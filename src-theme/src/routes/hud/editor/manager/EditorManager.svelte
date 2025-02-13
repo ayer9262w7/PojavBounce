@@ -1,6 +1,7 @@
 <script lang="ts">
     import Component from "./components/Component.svelte";
     import ComponentList from "./components/ComponentList.svelte";
+    import ComponentSelection from "../ComponentSelection.svelte";
 
     interface Props {
         components: Component[]
@@ -11,7 +12,10 @@
     let expanded = $state(true);
 </script>
 
+<ComponentSelection />
 <div class="editor-manager">
+
+
     {#if expanded}
         <div class="panel">
             <div class="header">Component Manager</div>

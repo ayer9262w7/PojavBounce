@@ -23,7 +23,7 @@
     let zoom = 100;
     let components: Component[] = [];
 
-    let editorMode = false;
+    let editorMode = true;
 
     onMount(async () => {
         const gameWindow = await getGameWindow();
@@ -39,10 +39,11 @@
     listen("componentsUpdate", async (data: ComponentsUpdateEvent) => {
         // force update to re-render
         components = await getComponents();
+
     });
 
     listen("virtualScreen", async (event: any) => {
-        editorMode = event.action == "open" && event.screenName == "editor";
+        // editorMode = event.action == "open" && event.screenName == "editor";
     });
 </script>
 
