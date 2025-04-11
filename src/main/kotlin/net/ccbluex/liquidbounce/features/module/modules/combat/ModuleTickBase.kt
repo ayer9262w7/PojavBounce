@@ -128,7 +128,7 @@ internal object ModuleTickBase : ClientModule("TickBase", Category.COMBAT) {
         }
 
         val (tick, _) = criticalTick ?: ticks.firstOrNull() ?: return@tickHandler
-        this@ModuleTickBase.debugParameter("Tick") { tick }
+        this@ModuleTickBase.debugParameter("Recommended Tick") { tick }
         this@ModuleTickBase.debugParameter("Critical Tick") { criticalTick?.index ?: -1 }
 
         if (tick == 0) {
@@ -144,7 +144,6 @@ internal object ModuleTickBase : ClientModule("TickBase", Category.COMBAT) {
                     call.tick()
                 }
 
-                ModuleDebug.debugParameter(this, "Recommended Skip", tick)
                 ticksToSkip = 0
             }
 
@@ -160,8 +159,7 @@ internal object ModuleTickBase : ClientModule("TickBase", Category.COMBAT) {
                     }
                 }
 
-                ModuleDebug.debugParameter(this, "Total Skipped", totalSkipped)
-                ModuleDebug.debugParameter(this, "Recommended Skip", tick)
+                this@ModuleTickBase.debugParameter("Total Skipped") { totalSkipped }
 
                 ticksToSkip = totalSkipped + additionalTicks
                 waitTicks(ticksToSkip)
