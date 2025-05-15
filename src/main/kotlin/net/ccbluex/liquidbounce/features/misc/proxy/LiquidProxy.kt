@@ -19,6 +19,7 @@
 package net.ccbluex.liquidbounce.features.misc.proxy
 
 import net.ccbluex.liquidbounce.api.core.AsyncLazy
+import net.ccbluex.liquidbounce.api.models.proxy.ProxySubscription
 import net.ccbluex.liquidbounce.api.services.proxy.ProxyApi
 
 /**
@@ -38,8 +39,24 @@ object LiquidProxy {
      */
     val locations by AsyncLazy(ProxyApi::getLocations)
 
-    fun getSubscription() {
+    /**
+     * Uses the [ProxyManager] to connect to a temporary created [Proxy]
+     * with the given [level] and [location] for the given [subscription].
+     */
+    fun connect(subscription: ProxySubscription, level: Int, location: String) {
+        // TODO: Replace the use of credentials with a token
+        val username = "${subscription.credentials.username}.${level}"
+        val password = subscription.credentials.password
 
+        val host = "any.${location}.liquidproxy.net"
+        val port = 1080 // LiquidProxy always uses port 1080
+
+        val proxy = Proxy(host, port, Proxy.Credentials(
+            username,
+            password
+        ), Proxy.Type.SOCKS5)
+
+        ProxyManager.proxy = proxy
     }
 
 }

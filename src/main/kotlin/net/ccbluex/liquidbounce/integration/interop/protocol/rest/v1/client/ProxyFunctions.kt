@@ -27,12 +27,14 @@ import com.mojang.blaze3d.systems.RenderSystem
 import io.netty.handler.codec.http.FullHttpResponse
 import kotlinx.coroutines.runBlocking
 import net.ccbluex.liquidbounce.api.models.auth.ClientAccount
+import net.ccbluex.liquidbounce.config.ConfigSystem
 import net.ccbluex.liquidbounce.config.gson.interopGson
 import net.ccbluex.liquidbounce.config.gson.util.emptyJsonObject
 import net.ccbluex.liquidbounce.features.cosmetic.ClientAccountManager
 import net.ccbluex.liquidbounce.features.misc.proxy.LiquidProxy
 import net.ccbluex.liquidbounce.features.misc.proxy.Proxy
 import net.ccbluex.liquidbounce.features.misc.proxy.ProxyManager
+import net.ccbluex.liquidbounce.utils.client.logger
 import net.ccbluex.liquidbounce.utils.client.mc
 import net.ccbluex.netty.http.model.RequestObject
 import net.ccbluex.netty.http.util.httpForbidden
@@ -61,15 +63,15 @@ fun postProxy(requestObject: RequestObject): FullHttpResponse {
     if (body.id < 0 || body.id >= ProxyManager.proxies.size) {
         return httpForbidden("Invalid id")
     }
-
-    ProxyManager.setProxy(body.id)
+    
+    ProxyManager.proxy = ProxyManager.proxies[body.id]
     return httpOk(emptyJsonObject())
 }
 
 // DELETE /api/v1/client/proxy
 @Suppress("UNUSED_PARAMETER")
 fun deleteProxy(requestObject: RequestObject): FullHttpResponse {
-    ProxyManager.unsetProxy()
+    ProxyManager.proxy = Proxy.NONE
     return httpOk(emptyJsonObject())
 }
 
@@ -105,7 +107,7 @@ fun postAddProxy(requestObject: RequestObject): FullHttpResponse {
         return httpForbidden("Illegal port")
     }
 
-    ProxyManager.addProxy(host, port, username, password, type, forwardAuthentication)
+    ProxyManager.validateProxy(Proxy(host, port, Proxy.credentials(username, password), type, forwardAuthentication))
     return httpOk(emptyJsonObject())
 }
 
@@ -114,22 +116,58 @@ fun postAddProxy(requestObject: RequestObject): FullHttpResponse {
 fun postClipboardProxy(requestObject: RequestObject): FullHttpResponse {
     RenderSystem.recordRenderCall {
         runCatching {
-            // Get clipboard content via GLFW
-            val clipboard = GLFW.glfwGetClipboardString(mc.window.handle) ?: ""
-
-            if (clipboard.isNotBlank()) {
-                val split = clipboard.split(":")
-                val host = split[0]
-                val port = split[1].toInt()
-
-                if (split.size > 2) {
-                    val username = split[2]
-                    val password = split[3]
-                    ProxyManager.addProxy(host, port, username, password)
-                } else {
-                    ProxyManager.addProxy(host, port)
-                }
+            val clipboardText = GLFW.glfwGetClipboardString(mc.window.handle)?.trim()
+            if (clipboardText.isNullOrBlank()) {
+                return@runCatching
             }
+            val proxyType = when {
+                @Suppress("HttpUrlsUsage")
+                clipboardText.startsWith("http://") -> Proxy.Type.HTTP
+
+                clipboardText.startsWith("socks5://") || clipboardText.startsWith("socks5h://") ->
+                    Proxy.Type.SOCKS5
+
+                else -> Proxy.Type.SOCKS5 // Default to SOCKS5
+            }
+            val proxyText = clipboardText.substringAfter("socks5://")
+
+            when {
+                // username:password@host:port
+                proxyText.contains("@") -> {
+                    val credentials = proxyText.substringBefore("@")
+                    val hostPort = proxyText.substringAfter("@")
+
+                    val username = credentials.substringBefore(":")
+                    val password = credentials.substringAfter(":")
+                    val host = hostPort.substringBefore(":")
+                    val port = hostPort.substringAfter(":").toInt()
+
+                    ProxyManager.validateProxy(Proxy(host, port, Proxy.credentials(username, password), proxyType))
+                }
+
+                // username:password:host:port
+                proxyText.count { it == ':' } == 3 -> {
+                    val parts = proxyText.split(":")
+                    val username = parts[0]
+                    val password = parts[1]
+                    val host = parts[2]
+                    val port = parts[3].toInt()
+
+                    ProxyManager.validateProxy(Proxy(host, port, Proxy.credentials(username, password), proxyType))
+                }
+
+                // host:port
+                else -> {
+                    val parts = proxyText.split(":")
+                    val host = parts[0]
+                    val port = parts[1].toInt()
+
+                    ProxyManager.validateProxy(Proxy(host, port, null, proxyType))
+                }
+
+            }
+        }.onFailure {
+            logger.error("Failed to add proxy from clipboard.", it)
         }
     }
 
@@ -158,7 +196,7 @@ fun postEditProxy(requestObject: RequestObject): FullHttpResponse {
         return httpForbidden("Illegal port")
     }
 
-    ProxyManager.editProxy(id, host, port, username, password, type, forwardAuthentication)
+    ProxyManager.validateProxy(Proxy(host, port, Proxy.credentials(username, password), type, forwardAuthentication), index = id)
     return httpOk(emptyJsonObject())
 }
 
@@ -173,7 +211,7 @@ fun postCheckProxy(requestObject: RequestObject): FullHttpResponse {
         return httpForbidden("Invalid id")
     }
 
-    ProxyManager.checkProxy(body.id)
+    ProxyManager.validateProxy(ProxyManager.proxies[body.id], checkOnly = true)
     return httpOk(emptyJsonObject())
 }
 
@@ -188,7 +226,9 @@ fun deleteRemoveProxy(requestObject: RequestObject): FullHttpResponse {
         return httpForbidden("Invalid id")
     }
 
-    ProxyManager.removeProxy(body.id)
+    if (ProxyManager.proxies.removeAt(body.id) == ProxyManager.proxy) {
+        ProxyManager.proxy = Proxy.NONE
+    }
     return httpOk(emptyJsonObject())
 }
 
@@ -203,7 +243,8 @@ fun putFavoriteProxy(requestObject: RequestObject): FullHttpResponse {
         return httpForbidden("Invalid id")
     }
 
-    ProxyManager.favoriteProxy(body.id)
+    ProxyManager.proxies[body.id].favorite = true
+    ConfigSystem.storeConfigurable(ProxyManager)
     return httpOk(emptyJsonObject())
 }
 
@@ -218,7 +259,8 @@ fun deleteFavoriteProxy(requestObject: RequestObject): FullHttpResponse {
         return httpForbidden("Invalid id")
     }
 
-    ProxyManager.unfavoriteProxy(body.id)
+    ProxyManager.proxies[body.id].favorite = false
+    ConfigSystem.storeConfigurable(ProxyManager)
     return httpOk(emptyJsonObject())
 }
 
@@ -242,7 +284,39 @@ fun getProxySubscription(requestObject: RequestObject): FullHttpResponse {
     return httpOk(interopGson.toJsonTree(subscription))
 }
 
+// POST /api/v1/services/liquidproxy
+@Suppress("UNUSED_PARAMETER")
+fun postProxyService(requestObject: RequestObject): FullHttpResponse {
+    data class ProxyRequest(val level: Int, val location: String)
 
-// GET /api/v1/liquidproxy/locations
+    val body = requestObject.asJson<ProxyRequest>()
+
+    if (body.level < 0) {
+        return httpForbidden("Invalid level")
+    }
+    if (body.location.isBlank()) {
+        return httpForbidden("Invalid location")
+    }
+
+    val clientAccount = ClientAccountManager.clientAccount
+    if (clientAccount == ClientAccount.EMPTY_ACCOUNT) {
+        return httpForbidden("No account")
+    }
+
+    if (clientAccount.proxySubscription == null) {
+        runBlocking {
+            clientAccount.updateProxySubscription()
+        }
+    }
+
+    val subscription = clientAccount.proxySubscription
+        ?: return httpForbidden("No subscription")
+
+    LiquidProxy.connect(subscription, body.level, body.location)
+    return httpOk(emptyJsonObject())
+}
+
+
+// GET /api/v1/services/liquidproxy/locations
 @Suppress("UNUSED_PARAMETER")
 fun getProxyLocations(requestObject: RequestObject) = httpOk(interopGson.toJsonTree(LiquidProxy.locations))

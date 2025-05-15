@@ -29,11 +29,7 @@
     import {notification} from "../common/header/notification_store";
     import lookup from "country-code-lookup";
     import {listen} from "../../../integration/ws";
-    import type {
-        ProxyAdditionResultEvent,
-        ProxyCheckResultEvent,
-        ProxyEditResultEvent
-    } from "../../../integration/events.js";
+    import type {ProxyCheckResultEvent} from "../../../integration/events.js";
 
     $: {
         let filteredProxies = proxies;
@@ -129,47 +125,11 @@
         await refreshProxies();
     }
 
-    listen("proxyAdditionResult", async (e: ProxyAdditionResultEvent) => {
-        if (e.error) {
-            notification.set({
-                title: "ProxyManager",
-                message: "Couldn't connect to proxy",
-                error: true
-            });
-        } else {
-            notification.set({
-                title: "ProxyManager",
-                message: "Successfully added proxy",
-                error: false
-            });
-
-            await refreshProxies();
-        }
-    });
-
-    listen("proxyEditResult", async (e: ProxyEditResultEvent) => {
-        if (e.error) {
-            notification.set({
-                title: "ProxyManager",
-                message: "Couldn't connect to proxy",
-                error: true
-            });
-        } else {
-            notification.set({
-                title: "ProxyManager",
-                message: "Successfully edited proxy",
-                error: false
-            });
-
-            await refreshProxies();
-        }
-    });
-
     listen("proxyCheckResult", async (e: ProxyCheckResultEvent) => {
         if (e.error) {
             notification.set({
                 title: "ProxyManager",
-                message: "Could not connect to proxy",
+                message: "The proxy is not working: " + e.error,
                 error: true
             });
         } else {

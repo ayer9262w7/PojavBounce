@@ -105,16 +105,6 @@ export interface PlayerInventory {
     crafting: ItemStack[];
 }
 
-export interface ProxyAdditionResultEvent {
-    proxy: Proxy | null;
-    error: string | null;
-}
-
-export interface ProxyEditResultEvent {
-    proxy: Proxy | null;
-    error: string | null;
-}
-
 export interface ProxyCheckResultEvent {
     proxy: Proxy;
     error: string | null;

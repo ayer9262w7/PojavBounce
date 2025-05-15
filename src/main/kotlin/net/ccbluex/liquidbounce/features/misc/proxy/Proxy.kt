@@ -60,6 +60,9 @@ data class Proxy(
     class Credentials(val username: String, val password: String)
 
     companion object {
+
+        val NONE = Proxy("", 0, null, Type.SOCKS5)
+
         @JvmStatic
         fun credentials(username: String, password: String): Credentials? {
             return if (username.isBlank() || password.isBlank()) {

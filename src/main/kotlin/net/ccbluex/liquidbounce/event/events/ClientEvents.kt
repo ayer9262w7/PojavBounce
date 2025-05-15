@@ -163,17 +163,9 @@ class AccountManagerAdditionResultEvent(val username: String? = null, val error:
 @WebSocketEvent
 class AccountManagerRemovalResultEvent(val username: String?) : Event()
 
-@Nameable("proxyAdditionResult")
-@WebSocketEvent
-class ProxyAdditionResultEvent(val proxy: Proxy? = null, val error: String? = null) : Event()
-
 @Nameable("proxyCheckResult")
 @WebSocketEvent
 class ProxyCheckResultEvent(val proxy: Proxy, val error: String? = null) : Event()
-
-@Nameable("proxyEditResult")
-@WebSocketEvent
-class ProxyEditResultEvent(val proxy: Proxy? = null, val error: String? = null) : Event()
 
 @Nameable("browserReady")
 class BrowserReadyEvent(val browser: IBrowser) : Event()
