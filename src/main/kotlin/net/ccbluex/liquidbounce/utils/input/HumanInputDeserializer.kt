@@ -85,7 +85,8 @@ object HumanInputDeserializer {
     }
 
     val statusEffectDeserializer: StringDeserializer<StatusEffect> = StringDeserializer {
-        val effect = Registries.STATUS_EFFECT.getOptionalValue(Identifier.fromCommandInput(StringReader(it))).getOrNull()
+        val effect = Registries.STATUS_EFFECT.getOptionalValue(Identifier.fromCommandInput(StringReader(it)))
+            .getOrNull()
 
         requireNotNull(effect) { "Unknown status effect '$it'" }
     }

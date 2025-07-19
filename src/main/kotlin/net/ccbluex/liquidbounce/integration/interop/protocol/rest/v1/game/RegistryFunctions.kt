@@ -167,7 +167,7 @@ private fun <T> constructMap(registry: DefaultedRegistry<T>, tagKeys: Array<TagK
 }
 
 // GET /api/v1/client/registry/:name
-@Suppress("UNUSED_PARAMETER")
+@Suppress("UNUSED_PARAMETER", "CognitiveComplexMethod")
 fun getRegistry(requestObject: RequestObject) = httpOk(JsonObject().apply {
     val parentMap = hashMapOf<Identifier, Identifier>()
     val world = mc.world ?: return httpForbidden("No world")
