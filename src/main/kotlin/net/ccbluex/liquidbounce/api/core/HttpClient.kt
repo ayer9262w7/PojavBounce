@@ -52,6 +52,15 @@ object HttpClient {
     val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     val FORM_MEDIA_TYPE = "application/x-www-form-urlencoded".toMediaType()
 
+    @JvmStatic
+    val isMcefAvailable: Boolean
+        get() = try {
+            Class.forName("net.ccbluex.liquidbounce.mcef.utils.FileUtils")
+            true
+        } catch (e: ClassNotFoundException) {
+            false
+        }
+
     /**
      * Client default [OkHttpClient]
      */

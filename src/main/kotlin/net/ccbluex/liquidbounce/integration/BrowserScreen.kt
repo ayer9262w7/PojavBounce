@@ -28,6 +28,10 @@ import net.ccbluex.liquidbounce.integration.backend.browser.BrowserViewport
 import net.minecraft.client.gui.DrawContext
 import net.minecraft.client.gui.screen.Screen
 import net.minecraft.text.Text
+import net.minecraft.client.gui.widget.ButtonWidget
+import net.ccbluex.liquidbounce.api.core.HttpClient
+import java.awt.Desktop
+import java.net.URI
 
 var browserBrowsers = mutableListOf<Browser>()
 
@@ -53,11 +57,29 @@ class BrowserScreen(val url: String, title: Text = "".asText()) : Screen(title) 
 
             browser.createBrowser(url, viewport, priority = 20) { mc.currentScreen == this }
                 .also { browserBrowsers.add(it) }
+            // Don't continue to add button if browser just created
+            if (!HttpClient.isMcefAvailable) {
+                addDrawableChild(ButtonWidget.builder(Text.of("Open in web browser")) {
+                    openUrlExternally(url)
+                }
+                .position(width / 2 - 75, height - 25)
+                .size(150, 20)
+                .build())
+            }
             return
         }
 
         // Update the position of all tabs
         browserBrowsers.forEach { browser -> browser.viewport = viewport }
+
+        if (!HttpClient.isMcefAvailable) {
+            addDrawableChild(ButtonWidget.builder(Text.of("Open in web browser")) {
+                openUrlExternally(url)
+            }
+            .position(width / 2 - 75, height - 25)
+            .size(150, 20)
+            .build())
+        }
     }
 
     override fun render(context: DrawContext, mouseX: Int, mouseY: Int, delta: Float) {
@@ -93,6 +115,14 @@ class BrowserScreen(val url: String, title: Text = "".asText()) : Screen(title) 
                     0x888888
                 )
             }
+        }
+    }
+
+    private fun openUrlExternally(url: String) {
+        try {
+            Desktop.getDesktop().browse(URI(url))
+        } catch (e: Exception) {
+            net.ccbluex.liquidbounce.utils.client.logger.error("Failed to open browser: ${e.message}")
         }
     }
 
