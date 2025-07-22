@@ -26,6 +26,7 @@ import net.ccbluex.liquidbounce.utils.client.logger
  * This replaces the WebSocket-based chat functionality with no-op stubs
  * since the chat system requires WebSocket libraries that were removed.
  */
+@Suppress("UnusedParameter")
 class ChatClient {
     
     val connected: Boolean = false

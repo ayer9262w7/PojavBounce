@@ -121,7 +121,7 @@ class FloatSettingWidget(
         renderBackground(context, isHovered)
         
         // Setting name and value
-        val displayText = "$name: ${String.format("%.2f", value)}"
+        val displayText = "$name: ${String.format(java.util.Locale.US, "%.2f", value)}"
         context.drawText(mc.textRenderer, displayText, x + 5, y + 5, 0xFFFFFF, false)
         
         // Slider track

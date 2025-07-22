@@ -102,7 +102,7 @@ class ClickGuiScreen : Screen(Text.literal("ClickGUI")) {
         }
     }
     
-    private fun renderSearchBar(context: DrawContext, mouseX: Int, mouseY: Int) {
+    private fun renderSearchBar(context: DrawContext, _mouseX: Int, _mouseY: Int) {
         val searchBarWidth = 300
         val searchBarHeight = 30
         val x = (width - searchBarWidth) / 2

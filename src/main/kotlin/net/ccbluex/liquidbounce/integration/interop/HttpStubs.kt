@@ -23,6 +23,9 @@ package net.ccbluex.liquidbounce.integration.interop
  * These stubs prevent compilation errors while the HTTP server functionality is being phased out.
  */
 
+// Suppress unused parameter warnings for all stub implementations
+@file:Suppress("UnusedParameter", "TooManyFunctions")
+
 // HTTP Method enum stub
 enum class HttpMethod {
     GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS
@@ -62,10 +65,10 @@ fun httpFile(file: Any): FullHttpResponse = StubHttpResponse(file)
 fun readImageAsBase64(file: Any): String? = null
 
 // HTTP routing stubs
-fun post(path: String, handler: (RequestObject) -> FullHttpResponse) {}
-fun get(path: String, handler: (RequestObject) -> FullHttpResponse) {}
-fun put(path: String, handler: (RequestObject) -> FullHttpResponse) {}
-fun delete(path: String, handler: (RequestObject) -> FullHttpResponse) {}
+fun post(path: String, handler: (RequestObject) -> FullHttpResponse) { /* Stub - HTTP routing disabled */ }
+fun get(path: String, handler: (RequestObject) -> FullHttpResponse) { /* Stub - HTTP routing disabled */ }
+fun put(path: String, handler: (RequestObject) -> FullHttpResponse) { /* Stub - HTTP routing disabled */ }
+fun delete(path: String, handler: (RequestObject) -> FullHttpResponse) { /* Stub - HTTP routing disabled */ }
 
 // Node routing stubs for InteropFunctionRegistry
 class Node {
@@ -74,10 +77,10 @@ class Node {
         return this
     }
     
-    fun get(path: String, handler: (RequestObject) -> FullHttpResponse) {}
-    fun post(path: String, handler: (RequestObject) -> FullHttpResponse) {}
-    fun put(path: String, handler: (RequestObject) -> FullHttpResponse) {}
-    fun delete(path: String, handler: (RequestObject) -> FullHttpResponse) {}
+    fun get(path: String, handler: (RequestObject) -> FullHttpResponse) { /* Stub - HTTP routing disabled */ }
+    fun post(path: String, handler: (RequestObject) -> FullHttpResponse) { /* Stub - HTTP routing disabled */ }
+    fun put(path: String, handler: (RequestObject) -> FullHttpResponse) { /* Stub - HTTP routing disabled */ }
+    fun delete(path: String, handler: (RequestObject) -> FullHttpResponse) { /* Stub - HTTP routing disabled */ }
 }
 
 fun Node.withPath(path: String, block: Node.() -> Unit): Node = withPath(path, block)
@@ -91,7 +94,7 @@ interface HttpServer {
 class HttpServerBuilder {
     fun port(port: Int) = this
     fun build(): HttpServer = object : HttpServer {
-        override fun start() {}
-        override fun stop() {}
+        override fun start() { /* Stub - HTTP server disabled */ }
+        override fun stop() { /* Stub - HTTP server disabled */ }
     }
 }

@@ -46,7 +46,7 @@ class ClickGuiPanel(
     private val moduleHeight get() = GuiConfig.moduleHeight
     private val headerHeight get() = GuiConfig.headerHeight
     
-    fun render(context: DrawContext, mouseX: Int, mouseY: Int, delta: Float) {
+    fun render(context: DrawContext, mouseX: Int, mouseY: Int, _delta: Float) {
         // Calculate actual height based on expansion state
         val actualHeight = if (expanded) {
             headerHeight + min(filteredModules.size * moduleHeight, GuiConfig.panelMaxHeight)
@@ -162,7 +162,7 @@ class ClickGuiPanel(
         context.fill(scrollbarX, thumbY, scrollbarX + scrollbarWidth, thumbY + thumbHeight, 0xFFAAAAAA.toInt())
     }
     
-    private fun moduleHasSettings(module: ClientModule): Boolean {
+    private fun moduleHasSettings(_module: ClientModule): Boolean {
         // Simple check - in real implementation, would check module's configuration tree
         return true // Placeholder
     }
@@ -225,7 +225,7 @@ class ClickGuiPanel(
         return false
     }
     
-    fun mouseDragged(mouseX: Double, mouseY: Double, button: Int, deltaX: Double, deltaY: Double): Boolean {
+    fun mouseDragged(mouseX: Double, mouseY: Double, button: Int, _deltaX: Double, _deltaY: Double): Boolean {
         if (isDragging && button == 0) {
             x = mouseX.toInt() - dragOffsetX
             y = mouseY.toInt() - dragOffsetY
@@ -240,7 +240,7 @@ class ClickGuiPanel(
         return false
     }
     
-    fun mouseReleased(mouseX: Double, mouseY: Double, button: Int) {
+    fun mouseReleased(_mouseX: Double, _mouseY: Double, _button: Int) {
         isDragging = false
     }
     

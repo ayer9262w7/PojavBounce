@@ -67,11 +67,11 @@ class BrowserScreen(val url: String, title: Text = "".asText()) : Screen(title) 
             val stubBrowser = object : Browser {
                 override var viewport: BrowserViewport = viewport
                 override var url: String = this@BrowserScreen.url
-                override fun close() {}
-                override fun reload() {}
-                override fun forceReload() {}
-                override fun goForward() {}
-                override fun goBack() {}
+                override fun close() { /* Stub implementation - no browser to close */ }
+                override fun reload() { /* Stub implementation - no browser to reload */ }
+                override fun forceReload() { /* Stub implementation - no browser to force reload */ }
+                override fun goForward() { /* Stub implementation - no browser to go forward */ }
+                override fun goBack() { /* Stub implementation - no browser to go back */ }
             }
             browserBrowsers.add(stubBrowser)
             return

@@ -98,7 +98,6 @@ object ModuleClickGui :
 
     // Note: Browser variable removed - no longer needed with native GUI
     // private var clickGuiBrowser: Browser? = null
-    private const val WORLD_CHANGE_SECONDS_UNTIL_RELOAD = 5
 
     init {
         tree(Snapping)

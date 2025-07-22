@@ -28,6 +28,7 @@ import kotlin.coroutines.suspendCoroutine
  * This is a temporary stub implementation that removes the Netty HTTP server dependency.
  * OAuth functionality is disabled until a proper native implementation is created.
  */
+@Suppress("UnusedParameter")
 object OAuthClient {
 
     /**
