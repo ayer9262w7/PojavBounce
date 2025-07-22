@@ -149,7 +149,13 @@ class ClickGuiPanel(
         )
         
         // Module border
-        context.fill(moduleX, moduleY + moduleHeight - 1, moduleX + width, moduleY + moduleHeight, GuiConfig.borderColor)
+        context.fill(
+            moduleX, 
+            moduleY + moduleHeight - 1, 
+            moduleX + width, 
+            moduleY + moduleHeight, 
+            GuiConfig.borderColor
+        )
         
         // Module name
         val textColor = if (module.running) GuiConfig.accentColor else 0xBBBBBB
@@ -157,7 +163,14 @@ class ClickGuiPanel(
         
         // Settings indicator if module has settings
         if (moduleHasSettings(module)) {
-            context.drawText(mc.textRenderer, "...", moduleX + width - 20, moduleY + 8, 0x888888, false)
+            context.drawText(
+            mc.textRenderer, 
+            "...", 
+            moduleX + width - 20, 
+            moduleY + 8, 
+            0x888888, 
+            false
+        )
         }
     }
     
@@ -176,7 +189,7 @@ class ClickGuiPanel(
         context.fill(scrollbarX, thumbY, scrollbarX + scrollbarWidth, thumbY + thumbHeight, 0xFFAAAAAA.toInt())
     }
     
-    @Suppress("UnusedParameter")
+    @Suppress("UnusedParameter", "FunctionOnlyReturningConstant")
     private fun moduleHasSettings(module: ClientModule): Boolean {
         // Simple check - in real implementation, would check module's configuration tree
         return true // Placeholder
