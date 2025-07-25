@@ -37,14 +37,21 @@ object GuiConfig {
     private const val DEFAULT_HEADER_HEIGHT = 6  // Made 3x smaller but still readable
     private const val DEFAULT_SEARCH_KEY = 342 // F3
     
-    // Color defaults - lighter to reduce darkish tint
-    private const val DEFAULT_BACKGROUND_COLOR = 0x80000000.toInt() // Reduced from 90% to 50% opacity
-    private const val DEFAULT_HEADER_COLOR = 0xFF333333.toInt() // Lighter header
-    private const val DEFAULT_ACCENT_COLOR = 0xFF00AAFF.toInt()
-    private const val DEFAULT_BORDER_COLOR = 0xFF666666.toInt() // Lighter border
-    private const val DEFAULT_TEXT_COLOR = 0xFFFFFF
-    private const val DEFAULT_ENABLED_MODULE_COLOR = 0xFF004080.toInt() // Slightly lighter enabled module color
-    private const val DEFAULT_HOVER_COLOR = 0xFF444444.toInt() // Lighter hover color
+    // Color defaults - much lighter and more visible
+    // Further reduced to 44% opacity for lighter appearance
+    private const val DEFAULT_BACKGROUND_COLOR = 0x70000000.toInt()
+    // Much lighter header for better visibility
+    private const val DEFAULT_HEADER_COLOR = 0xFF555555.toInt()
+    // Brighter accent for better visibility
+    private const val DEFAULT_ACCENT_COLOR = 0xFF22CCFF.toInt()
+    // Much lighter border for better definition
+    private const val DEFAULT_BORDER_COLOR = 0xFF888888.toInt()
+    // Bright white text for maximum visibility
+    private const val DEFAULT_TEXT_COLOR = 0xFFFFFFFF.toInt()
+    // Brighter enabled module color
+    private const val DEFAULT_ENABLED_MODULE_COLOR = 0xFF0088CC.toInt()
+    // Lighter hover color for better contrast
+    private const val DEFAULT_HOVER_COLOR = 0xFF666666.toInt()
     
     init {
         loadConfig()

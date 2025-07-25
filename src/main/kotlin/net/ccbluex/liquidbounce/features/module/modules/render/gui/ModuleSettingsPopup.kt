@@ -18,6 +18,7 @@
  */
 package net.ccbluex.liquidbounce.features.module.modules.render.gui
 
+import net.ccbluex.liquidbounce.config.ConfigSystem
 import net.ccbluex.liquidbounce.config.types.RangedValue
 import net.ccbluex.liquidbounce.config.types.Value
 import net.ccbluex.liquidbounce.config.types.ValueType
@@ -180,7 +181,10 @@ class ModuleSettingsPopup(
             name = value.name,
             value = typedValue.get(),
             config = WidgetConfig(x = widgetX, y = widgetY, width = widgetWidth),
-            onValueChanged = { newValue -> typedValue.set(newValue) }
+            onValueChanged = { newValue -> 
+                typedValue.set(newValue)
+                saveModuleConfiguration()
+            }
         )
     }
     
@@ -193,7 +197,10 @@ class ModuleSettingsPopup(
             name = value.name,
             value = currentValue,
             config = RangeWidgetConfig(x = widgetX, y = widgetY, min = min, max = max, width = widgetWidth),
-            onValueChanged = { newValue -> typedValue.set(newValue) }
+            onValueChanged = { newValue -> 
+                typedValue.set(newValue)
+                saveModuleConfiguration()
+            }
         )
     }
     
@@ -206,7 +213,10 @@ class ModuleSettingsPopup(
             name = value.name,
             value = currentValue,
             config = IntRangeWidgetConfig(x = widgetX, y = widgetY, min = min, max = max, width = widgetWidth),
-            onValueChanged = { newValue -> typedValue.set(newValue) }
+            onValueChanged = { newValue -> 
+                typedValue.set(newValue)
+                saveModuleConfiguration()
+            }
         )
     }
     
@@ -217,7 +227,10 @@ class ModuleSettingsPopup(
             name = value.name,
             value = typedValue.get(),
             config = WidgetConfig(x = widgetX, y = widgetY, width = widgetWidth),
-            onValueChanged = { newValue -> typedValue.set(newValue) }
+            onValueChanged = { newValue -> 
+                typedValue.set(newValue)
+                saveModuleConfiguration()
+            }
         )
     }
     
@@ -234,6 +247,7 @@ class ModuleSettingsPopup(
             config = WidgetConfig(x = widgetX, y = widgetY, width = widgetWidth),
             onValueChanged = { choiceName -> 
                 chooseValue.setByString(choiceName)
+                saveModuleConfiguration()
             }
         )
     }
@@ -603,5 +617,16 @@ class ModuleSettingsPopup(
         }
         
         return false
+    }
+    
+    /**
+     * Save the module configuration to persist changes
+     */
+    private fun saveModuleConfiguration() {
+        try {
+            ConfigSystem.storeConfigurable(module)
+        } catch (e: Exception) {
+            println("Error saving configuration for module ${module.name}: ${e.message}")
+        }
     }
 }
