@@ -57,14 +57,8 @@ object ModuleHud : ClientModule("HUD", Category.RENDER, state = true, hide = tru
     override val running
         get() = this.enabled && !isDestructed && inGame
 
-    private val visible: Boolean
-        get() = !isHidingNow && inGame
-
     override val baseKey: String
         get() = "liquidbounce.module.hud"
-    private var browserBrowser: Browser? = null
-
-
 
     @Suppress("unused")
     private val spaceSeperatedNames by boolean("SpaceSeperatedNames", true).onChange { state ->
@@ -76,8 +70,6 @@ object ModuleHud : ClientModule("HUD", Category.RENDER, state = true, hide = tru
 
     val isBlurEffectActive
         get() = false  // Blur disabled entirely as requested
-
-    var browserSettings: BrowserSettings? = null
 
     init {
         tree(Configurable("In-built", value = components as MutableList<Value<*>>))
@@ -92,71 +84,13 @@ object ModuleHud : ClientModule("HUD", Category.RENDER, state = true, hide = tru
         // Minimap
         RenderedEntities.subscribe(this)
         ChunkScanner.subscribe(ChunkRenderer.MinimapChunkUpdateSubscriber)
-
-        if (visible) {
-            open()
-        }
     }
 
     override fun disable() {
-        // Closes tab entirely
-        browserBrowser?.close()
-        browserBrowser = null
-
         // Minimap
         RenderedEntities.unsubscribe(this)
         ChunkScanner.unsubscribe(ChunkRenderer.MinimapChunkUpdateSubscriber)
         ChunkRenderer.unloadEverything()
-    }
-
-    @Suppress("unused")
-    private val browserReadyHandler = handler<BrowserReadyEvent> { event ->
-        tree(GlobalBrowserSettings)
-        browserSettings = tree(BrowserSettings(60, ::reopen))
-    }
-
-    @Suppress("unused")
-    private val screenHandler = handler<ScreenEvent> { event ->
-        // Close the tab when the HUD is not running, is hiding now, or the player is not in-game
-        if (!enabled || !visible) {
-            close()
-            return@handler
-        }
-
-        // Otherwise, open the tab and set its visibility
-        val browserTab = open()
-        browserTab.visible = event.screen !is DisconnectedScreen && event.screen !is DownloadingTerrainScreen
-    }
-
-    @Suppress("unused")
-    private val disconnectHandler = handler<DisconnectEvent> {
-        close()
-    }
-
-    private fun open(): Browser {
-        if (browserBrowser != null) {
-            return browserBrowser!!
-        }
-
-        return ThemeManager.openImmediate(
-            VirtualScreenType.HUD,
-            true,
-            browserSettings!!
-        ).also { browser ->
-            browserBrowser = browser
-        }
-    }
-
-    private fun close() {
-        browserBrowser?.close()
-        browserBrowser = null
-    }
-
-    fun reopen() {
-        close()
-        if (enabled && visible) {
-            open()
-        }
     }
 
 }
