@@ -66,11 +66,14 @@ class ClickGuiPanel(
     private var isScrollDragging = false
     private var scrollDragStartY = 0.0
     private var filteredModules = allModules
+    var hoveredModuleDescription: String? = null
     private val moduleHeight get() = GuiConfig.moduleHeight
     private val headerHeight get() = GuiConfig.headerHeight
     
     @Suppress("UnusedParameter")
     fun render(context: DrawContext, mouseX: Int, mouseY: Int, delta: Float) {
+        hoveredModuleDescription = null // Reset every frame
+
         // Calculate actual height based on expansion state
         val actualHeight = if (expanded) {
             headerHeight + min(filteredModules.size * moduleHeight, GuiConfig.panelMaxHeight)
@@ -148,6 +151,10 @@ class ClickGuiPanel(
                        renderData.mouseX <= renderData.moduleX + width && 
                        renderData.mouseY >= renderData.moduleY && 
                        renderData.mouseY <= renderData.moduleY + moduleHeight
+        
+        if (isHovered) {
+            hoveredModuleDescription = renderData.module.description
+        }
         
         // Module background
         val bgColor = when {

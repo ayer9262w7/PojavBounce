@@ -105,6 +105,9 @@ class ClickGuiScreen : Screen(Text.literal("ClickGUI")) {
         // Render settings popup if visible (render last so it appears on top)
         currentSettingsPopup?.render(context, mouseX, mouseY, delta)
         
+        // Render tooltip for hovered module
+        renderTooltip(context, mouseX, mouseY)
+        
         super.render(context, mouseX, mouseY, delta)
     }
     
@@ -115,6 +118,30 @@ class ClickGuiScreen : Screen(Text.literal("ClickGUI")) {
         // Grid removed as requested - no longer rendering grid lines
     }
     
+    private fun renderTooltip(context: DrawContext, mouseX: Int, mouseY: Int) {
+        val description = panels.values.firstNotNullOfOrNull { it.hoveredModuleDescription }
+
+        if (description != null && description.isNotBlank()) {
+            val tooltipX = mouseX + 12
+            val tooltipY = mouseY - 12
+            val maxWidth = 150 // Max width for the tooltip
+
+            val wrappedText = textRenderer.wrapLines(Text.literal(description), maxWidth)
+            val tooltipHeight = wrappedText.size * textRenderer.fontHeight + 6
+            val tooltipWidth = wrappedText.maxOfOrNull { textRenderer.getWidth(it) }?.plus(6) ?: maxWidth
+
+            // Background
+            context.fill(tooltipX - 3, tooltipY - 3, tooltipX + tooltipWidth, tooltipY + tooltipHeight, 0xE0101010.toInt())
+
+            // Render wrapped text
+            var currentY = tooltipY
+            for (line in wrappedText) {
+                context.drawText(textRenderer, line, tooltipX, currentY, 0xFFFFFFFF.toInt(), false)
+                currentY += textRenderer.fontHeight
+            }
+        }
+    }
+
     @Suppress("UnusedParameter")
     private fun renderSearchBar(context: DrawContext, mouseX: Int, mouseY: Int) {
         val searchBarWidth = 300
