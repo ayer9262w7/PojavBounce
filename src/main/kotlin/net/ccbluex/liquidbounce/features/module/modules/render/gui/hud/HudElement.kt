@@ -21,6 +21,7 @@ package net.ccbluex.liquidbounce.features.module.modules.render.gui.hud
 import net.ccbluex.liquidbounce.features.module.ModuleManager
 import net.ccbluex.liquidbounce.utils.client.mc
 import net.minecraft.client.gui.DrawContext
+import java.awt.Color
 
 /**
  * Base class for HUD elements
@@ -28,8 +29,8 @@ import net.minecraft.client.gui.DrawContext
 abstract class HudElement(
     x: Int,
     y: Int,
-    val width: Int,
-    val height: Int
+    var width: Int,
+    var height: Int
 ) {
     abstract val name: String
     
@@ -130,8 +131,8 @@ class ArrayListElement(x: Int, y: Int) : HudElement(x, y, 1, 1) { // Width and h
             .sortedByDescending { mc.textRenderer.getWidth(it.name) }
 
         if (enabledModules.isEmpty() && !isSelected) {
-            (this as HudElement).width = 0
-            (this as HudElement).height = 0
+            width = 0
+            height = 0
             return
         }
 
@@ -139,8 +140,8 @@ class ArrayListElement(x: Int, y: Int) : HudElement(x, y, 1, 1) { // Width and h
         val dynamicWidth = if (enabledModules.isNotEmpty()) enabledModules.maxOf { mc.textRenderer.getWidth(it.name) } + 10 else 100
         val dynamicHeight = if (enabledModules.isNotEmpty()) enabledModules.size * (mc.textRenderer.fontHeight + 2) + 5 else 20
         
-        (this as HudElement).width = dynamicWidth
-        (this as HudElement).height = dynamicHeight
+        width = dynamicWidth
+        height = dynamicHeight
 
         renderBackground(context, isSelected)
         
@@ -148,10 +149,16 @@ class ArrayListElement(x: Int, y: Int) : HudElement(x, y, 1, 1) { // Width and h
         for ((index, module) in enabledModules.withIndex()) {
             val text = module.name
             val textWidth = mc.textRenderer.getWidth(text)
-            val color = HudScreenHelper.getRainbowColor(index)
+            val color = getRainbowColor(index)
             context.drawText(mc.textRenderer, text, x + width - textWidth - 5, yOffset, color, true)
             yOffset += mc.textRenderer.fontHeight + 2
         }
+    }
+
+    private fun getRainbowColor(index: Int, speed: Float = 2000f, saturation: Float = 0.7f, brightness: Float = 0.8f): Int {
+        var hue = (System.currentTimeMillis() + index * 100) % speed.toLong()
+        hue /= speed.toLong()
+        return Color.HSBtoRGB(hue, saturation, brightness)
     }
 }
 
@@ -184,7 +191,7 @@ class InfoPanelElement(x: Int, y: Int) : HudElement(x, y, 150, 60) {
         }
         
         // Adjust height dynamically
-        (this as HudElement).height = infoLines.size * (mc.textRenderer.fontHeight + 2) + 10
+        height = infoLines.size * (mc.textRenderer.fontHeight + 2) + 10
     }
 }
 

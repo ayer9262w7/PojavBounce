@@ -190,9 +190,4 @@ object HudScreenHelper {
         }
     }
 
-    fun getRainbowColor(index: Int, speed: Float = 2000f, saturation: Float = 0.7f, brightness: Float = 0.8f): Int {
-        var hue = (System.currentTimeMillis() + index * 100) % speed.toLong()
-        hue /= speed.toLong()
-        return Color.HSBtoRGB(hue, saturation, brightness)
-    }
 }
