@@ -16,3 +16,4 @@
 /src-theme/node_modules/
 /src-theme/dist/
 /src-theme/.svelte-kit/
+.aider*
