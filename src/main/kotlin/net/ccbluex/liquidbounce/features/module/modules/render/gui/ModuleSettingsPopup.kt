@@ -173,10 +173,6 @@ class ModuleSettingsPopup(
     
     @Suppress("UNCHECKED_CAST")
     private fun createWidgetForValue(value: Value<*>, widgetX: Int, widgetY: Int, widgetWidth: Int): SettingWidget<*>? {
-        if (value is Configurable) {
-            return createSectionHeaderWidget(value, widgetX, widgetY, widgetWidth)
-        }
-
         return when (value.valueType) {
             ValueType.BOOLEAN -> createBooleanWidget(value, widgetX, widgetY, widgetWidth)
             ValueType.FLOAT -> createFloatWidget(value, widgetX, widgetY, widgetWidth)
@@ -191,7 +187,11 @@ class ModuleSettingsPopup(
             ValueType.LIST, ValueType.BLOCK -> createListWidget(value, widgetX, widgetY, widgetWidth)
             ValueType.COLOR -> createColorWidget(value, widgetX, widgetY, widgetWidth)
             ValueType.MULTI_CHOOSE -> createMultiChooseWidget(value, widgetX, widgetY, widgetWidth)
-            else -> null
+            else -> if (value is Configurable) {
+                createSectionHeaderWidget(value, widgetX, widgetY, widgetWidth)
+            } else {
+                null
+            }
         }
     }
     
