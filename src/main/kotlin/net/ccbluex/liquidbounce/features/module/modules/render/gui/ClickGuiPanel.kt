@@ -468,12 +468,9 @@ object ClickGuiPanelRenderer {
  * Helper object for ClickGui panel utilities
  */
 object ClickGuiPanelHelper {
-    const val HAS_SETTINGS = true // Placeholder
-    
-    @Suppress("UnusedParameter")
     fun moduleHasSettings(module: ClientModule): Boolean {
         // Simple check - in real implementation, would check module's configuration tree
-        return HAS_SETTINGS
+        return module.inner.isNotEmpty()
     }
 }
 

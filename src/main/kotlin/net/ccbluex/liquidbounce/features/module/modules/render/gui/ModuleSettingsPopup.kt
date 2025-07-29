@@ -19,11 +19,8 @@
 package net.ccbluex.liquidbounce.features.module.modules.render.gui
 
 import net.ccbluex.liquidbounce.config.ConfigSystem
-import net.ccbluex.liquidbounce.config.types.RangedValue
-import net.ccbluex.liquidbounce.config.types.Value
-import net.ccbluex.liquidbounce.config.types.ValueType
-import net.ccbluex.liquidbounce.config.types.ChooseListValue
-import net.ccbluex.liquidbounce.config.types.NamedChoice
+import net.ccbluex.liquidbounce.config.types.*
+import net.ccbluex.liquidbounce.config.types.nesting.Configurable
 import net.ccbluex.liquidbounce.features.module.ClientModule
 import net.ccbluex.liquidbounce.features.module.modules.render.gui.settings.BooleanSettingWidget
 import net.ccbluex.liquidbounce.features.module.modules.render.gui.settings.FloatSettingWidget
@@ -144,20 +141,30 @@ class ModuleSettingsPopup(
     private fun initializeSettingWidgets() {
         settingWidgets.clear()
         
+        val values = mutableListOf<Value<*>>()
+        collectValues(module, values)
+
         var currentY = y + POPUP_PADDING
-        
-        try {
-            val values = module.containedValues
-            
-            for (value in values) {
-                val widget = createWidgetForValue(value, x + POPUP_PADDING, currentY)
-                if (widget != null) {
-                    settingWidgets.add(widget)
-                    currentY += SETTING_HEIGHT + SETTING_SPACING
-                }
+        for (value in values) {
+            val widget = createWidgetForValue(value, x + POPUP_PADDING, currentY)
+            if (widget != null) {
+                settingWidgets.add(widget)
+                currentY += SETTING_HEIGHT + SETTING_SPACING
             }
-        } catch (e: Exception) {
-            println("Error initializing settings for module ${module.name}: ${e.message}")
+        }
+        
+        calculatePosition() // Recalculate size and position based on content
+    }
+
+    private fun collectValues(configurable: Configurable, list: MutableList<Value<*>>) {
+        for (value in configurable.inner) {
+            list.add(value)
+            
+            if (value is net.ccbluex.liquidbounce.config.types.nesting.ChoiceConfigurable<*>) {
+                collectValues(value.activeChoice, list)
+            } else if (value is Configurable) {
+                collectValues(value, list)
+            }
         }
     }
     
@@ -171,6 +178,7 @@ class ModuleSettingsPopup(
             ValueType.INT -> createIntWidget(value, widgetX, widgetY, widgetWidth)
             ValueType.TEXT -> createTextWidget(value, widgetX, widgetY, widgetWidth)
             ValueType.CHOOSE -> createChooseWidget(value, widgetX, widgetY, widgetWidth)
+            ValueType.CHOICE -> createChoiceConfigurableWidget(value, widgetX, widgetY, widgetWidth)
             ValueType.INT_RANGE -> createIntRangeAsTextWidget(value, widgetX, widgetY, widgetWidth)
             ValueType.FLOAT_RANGE -> createFloatRangeAsTextWidget(value, widgetX, widgetY, widgetWidth)
             else -> null
@@ -256,6 +264,30 @@ class ModuleSettingsPopup(
             onValueChanged = { choiceName -> 
                 chooseValue.setByString(choiceName)
                 saveModuleConfiguration()
+
+                // Re-initialize widgets to show settings for the new choice
+                initializeSettingWidgets()
+            }
+        )
+    }
+    
+    @Suppress("UNCHECKED_CAST")
+    private fun createChoiceConfigurableWidget(value: Value<*>, widgetX: Int, widgetY: Int, widgetWidth: Int): EnumSettingWidget {
+        val choiceConfigurable = value as net.ccbluex.liquidbounce.config.types.nesting.ChoiceConfigurable<*>
+        val currentChoice = choiceConfigurable.activeChoice
+        val choiceNames = choiceConfigurable.choices.map { it.choiceName }.toTypedArray()
+        
+        return EnumSettingWidget(
+            name = value.name,
+            value = currentChoice.choiceName,
+            choices = choiceNames,
+            config = WidgetConfig(x = widgetX, y = widgetY, width = widgetWidth),
+            onValueChanged = { choiceName ->
+                choiceConfigurable.setByString(choiceName)
+                saveModuleConfiguration()
+
+                // Re-initialize widgets to show settings for the new choice
+                initializeSettingWidgets()
             }
         )
     }
