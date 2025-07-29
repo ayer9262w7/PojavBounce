@@ -56,6 +56,7 @@ class ModuleSettingsPopup(
     }
     
     private val settingWidgets = mutableListOf<SettingWidget<*>>()
+    private var openDropdown: EnumSettingWidget? = null
     private var scrollOffset = 0
     private var x = 0
     private var y = 0
@@ -81,6 +82,7 @@ class ModuleSettingsPopup(
      */
     fun hide() {
         isVisible = false
+        openDropdown = null
         try {
             // write this module's config back out
             ConfigSystem.storeConfigurable(module as net.ccbluex.liquidbounce.config.types.nesting.Configurable)
@@ -395,12 +397,22 @@ class ModuleSettingsPopup(
         
         try {
             for (widget in settingWidgets) {
+                if (widget == openDropdown) continue // Defer rendering of open dropdown
+                
                 val isHovered = widget.isMouseOver(mouseX, mouseY + scrollOffset)
                 widget.render(context, mouseX, mouseY + scrollOffset, isHovered)
             }
         } finally {
             context.matrices.pop()
             context.disableScissor()
+        }
+
+        // Render the open dropdown last and outside the scissor area
+        openDropdown?.let { dropdown ->
+            context.matrices.push()
+            context.matrices.translate(0.0, -scrollOffset.toDouble(), 0.0)
+            dropdown.render(context, mouseX, mouseY + scrollOffset, true)
+            context.matrices.pop()
         }
         
         // Scrollbar if needed
@@ -449,22 +461,41 @@ class ModuleSettingsPopup(
         // Check close button click
         val closeButtonX = x + POPUP_WIDTH - 16
         val closeButtonY = y + 4
-        if (intMouseX >= closeButtonX && intMouseX <= closeButtonX + 12 && 
+        if (intMouseX >= closeButtonX && intMouseX <= closeButtonX + 12 &&
             intMouseY >= closeButtonY && intMouseY <= closeButtonY + 12) {
             hide()
             return true
         }
-        
+
         // Check if clicking outside popup to close it
         if (!isMouseOver(intMouseX, intMouseY)) {
             hide()
             return false
+        }
+
+        // Handle open dropdown first - it's modal
+        openDropdown?.let { dropdown ->
+            // Pass click to dropdown
+            if (dropdown.mouseClicked(mouseX, mouseY + scrollOffset, button)) {
+                // Check if dropdown closed itself
+                if (!dropdown.expanded) {
+                    openDropdown = null
+                }
+            } else {
+                // Click was outside the active dropdown, so close it
+                dropdown.expanded = false
+                openDropdown = null
+            }
+            return true
         }
         
         // Handle widget clicks
         var foundWidgetClick = false
         for (widget in settingWidgets) {
             if (handleWidgetClick(widget, mouseX, mouseY, button)) {
+                if (widget is EnumSettingWidget && widget.expanded) {
+                    openDropdown = widget
+                }
                 foundWidgetClick = true
                 break
             }
