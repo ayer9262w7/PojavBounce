@@ -177,17 +177,6 @@ class ClickGuiPanel(
         }
     }
     
-    private fun renderModuleSettings(context: DrawContext, module: ClientModule, startY: Int, mouseX: Int, mouseY: Int): Int {
-        var settingsY = startY
-        val widgets = moduleSettingWidgets[module] ?: return 0
-
-        for (widget in widgets) {
-            widget.y = settingsY
-            widget.render(context, mouseX, mouseY, widget.isMouseOver(mouseX, mouseY))
-            settingsY += SETTING_HEIGHT + SETTING_SPACING
-        }
-        return settingsY - startY
-    }
     
     /**
      * Data class for module rendering parameters
@@ -283,19 +272,14 @@ class ClickGuiPanel(
             return true
         }
 
-        if (!isClickWithinBounds(intMouseX, intMouseY)) {
-            return false
+        // Check if click is within bounds and handle accordingly
+        return if (!isClickWithinBounds(intMouseX, intMouseY)) {
+            false
+        } else when {
+            isHeaderClick(intMouseY) -> handleHeaderClick(intMouseX, intMouseY, button)
+            isModuleAreaClick(intMouseY) -> handleModuleAreaClick(intMouseX, intMouseY, button)
+            else -> false
         }
-        
-        if (isHeaderClick(intMouseY)) {
-            return handleHeaderClick(intMouseX, intMouseY, button)
-        }
-        
-        if (isModuleAreaClick(intMouseY)) {
-            return handleModuleAreaClick(intMouseX, intMouseY, button)
-        }
-        
-        return false
     }
     
     private fun isClickWithinBounds(mouseX: Int, mouseY: Int): Boolean {
@@ -350,7 +334,13 @@ class ClickGuiPanel(
                     for (widget in widgets) {
                         widget.y = currentY // Temporarily set y for hit-testing
                         if (widget.isMouseOver(mouseX, mouseY + scrollOffset)) {
-                            if (handleWidgetClick(widget, mouseX.toDouble(), (mouseY + scrollOffset).toDouble(), button)) {
+                            val widgetClick = handleWidgetClick(
+                                widget, 
+                                mouseX.toDouble(), 
+                                (mouseY + scrollOffset).toDouble(), 
+                                button
+                            )
+                            if (widgetClick) {
                                 return true
                             }
                         }
@@ -577,7 +567,13 @@ class ClickGuiPanel(
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun createWidgetForValue(value: Value<*>, widgetX: Int, widgetY: Int, widgetWidth: Int, module: ClientModule): SettingWidget<*>? {
+    private fun createWidgetForValue(
+        value: Value<*>, 
+        widgetX: Int, 
+        widgetY: Int, 
+        widgetWidth: Int, 
+        module: ClientModule
+    ): SettingWidget<*>? {
         return when (value.valueType) {
             ValueType.BOOLEAN -> createBooleanWidget(value, widgetX, widgetY, widgetWidth, module)
             ValueType.FLOAT -> createFloatWidget(value, widgetX, widgetY, widgetWidth, module)
@@ -594,7 +590,13 @@ class ClickGuiPanel(
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun createBooleanWidget(value: Value<*>, widgetX: Int, widgetY: Int, widgetWidth: Int, module: ClientModule): BooleanSettingWidget {
+    private fun createBooleanWidget(
+        value: Value<*>, 
+        widgetX: Int, 
+        widgetY: Int, 
+        widgetWidth: Int, 
+        module: ClientModule
+    ): BooleanSettingWidget {
         val typedValue = value as Value<Boolean>
         return BooleanSettingWidget(
             name = value.name,
@@ -608,13 +610,21 @@ class ClickGuiPanel(
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun createFloatWidget(value: Value<*>, widgetX: Int, widgetY: Int, widgetWidth: Int, module: ClientModule): FloatSettingWidget {
+    private fun createFloatWidget(
+        value: Value<*>, 
+        widgetX: Int, 
+        widgetY: Int, 
+        widgetWidth: Int, 
+        module: ClientModule
+    ): FloatSettingWidget {
         val typedValue = value as Value<Float>
         val (min, max) = getRangeForValue(value, 0.0f, 10.0f)
         return FloatSettingWidget(
             name = value.name,
             value = typedValue.get(),
-            config = RangeWidgetConfig(x = widgetX, y = widgetY, min = min, max = max, width = widgetWidth, height = SETTING_HEIGHT),
+            config = RangeWidgetConfig(
+                x = widgetX, y = widgetY, min = min, max = max, width = widgetWidth, height = SETTING_HEIGHT
+            ),
             onValueChanged = { newValue ->
                 typedValue.set(newValue)
                 saveModuleConfiguration(module)
@@ -623,13 +633,21 @@ class ClickGuiPanel(
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun createIntWidget(value: Value<*>, widgetX: Int, widgetY: Int, widgetWidth: Int, module: ClientModule): IntSettingWidget {
+    private fun createIntWidget(
+        value: Value<*>, 
+        widgetX: Int, 
+        widgetY: Int, 
+        widgetWidth: Int, 
+        module: ClientModule
+    ): IntSettingWidget {
         val typedValue = value as Value<Int>
         val (min, max) = getRangeForValue(value, 0, 1000)
         return IntSettingWidget(
             name = value.name,
             value = typedValue.get(),
-            config = IntRangeWidgetConfig(x = widgetX, y = widgetY, min = min, max = max, width = widgetWidth, height = SETTING_HEIGHT),
+            config = IntRangeWidgetConfig(
+                x = widgetX, y = widgetY, min = min, max = max, width = widgetWidth, height = SETTING_HEIGHT
+            ),
             onValueChanged = { newValue ->
                 typedValue.set(newValue)
                 saveModuleConfiguration(module)
@@ -638,7 +656,13 @@ class ClickGuiPanel(
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun createTextWidget(value: Value<*>, widgetX: Int, widgetY: Int, widgetWidth: Int, module: ClientModule): TextSettingWidget {
+    private fun createTextWidget(
+        value: Value<*>, 
+        widgetX: Int, 
+        widgetY: Int, 
+        widgetWidth: Int, 
+        module: ClientModule
+    ): TextSettingWidget {
         val typedValue = value as Value<String>
         return TextSettingWidget(
             name = value.name,
@@ -652,7 +676,13 @@ class ClickGuiPanel(
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun createChooseWidget(value: Value<*>, widgetX: Int, widgetY: Int, widgetWidth: Int, module: ClientModule): EnumSettingWidget {
+    private fun createChooseWidget(
+        value: Value<*>, 
+        widgetX: Int, 
+        widgetY: Int, 
+        widgetWidth: Int, 
+        module: ClientModule
+    ): EnumSettingWidget {
         val chooseValue = value as ChooseListValue<*>
         val currentChoice = chooseValue.get() as NamedChoice
         val choiceNames = chooseValue.choices.map { it.choiceName }.toTypedArray()
@@ -672,7 +702,13 @@ class ClickGuiPanel(
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun createChoiceConfigurableWidget(value: Value<*>, widgetX: Int, widgetY: Int, widgetWidth: Int, module: ClientModule): EnumSettingWidget {
+    private fun createChoiceConfigurableWidget(
+        value: Value<*>, 
+        widgetX: Int, 
+        widgetY: Int, 
+        widgetWidth: Int, 
+        module: ClientModule
+    ): EnumSettingWidget {
         val choiceConfigurable = value as net.ccbluex.liquidbounce.config.types.nesting.ChoiceConfigurable<*>
         val currentChoice = choiceConfigurable.activeChoice
         val choiceNames = choiceConfigurable.choices.map { it.choiceName }.toTypedArray()
@@ -704,6 +740,8 @@ class ClickGuiPanel(
                 Pair(defaultMin, defaultMax)
             }
         } catch (e: Exception) {
+            // Log error and use default range if configuration is invalid
+            println("Warning: Invalid range configuration for value ${value.name}: ${e.message}")
             Pair(defaultMin, defaultMax)
         }
     }
@@ -717,7 +755,13 @@ class ClickGuiPanel(
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun createBindWidget(value: Value<*>, widgetX: Int, widgetY: Int, widgetWidth: Int, module: ClientModule): TextSettingWidget {
+    private fun createBindWidget(
+        value: Value<*>, 
+        widgetX: Int, 
+        widgetY: Int, 
+        widgetWidth: Int, 
+        module: ClientModule
+    ): TextSettingWidget {
         val typedValue = value as Value<InputBind>
         return TextSettingWidget(
             name = value.name,
@@ -727,13 +771,19 @@ class ClickGuiPanel(
                 try {
                     value.setByString(newValue)
                     saveModuleConfiguration(module)
-                } catch (e: Exception) { /* Ignore */ }
+                } catch (e: Exception) { /* Log parse error for debugging */ println("Parse error: ${e.message}") }
             }
         )
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun createListWidget(value: Value<*>, widgetX: Int, widgetY: Int, widgetWidth: Int, module: ClientModule): TextSettingWidget {
+    private fun createListWidget(
+        value: Value<*>, 
+        widgetX: Int, 
+        widgetY: Int, 
+        widgetWidth: Int, 
+        module: ClientModule
+    ): TextSettingWidget {
         val typedValue = value as ListValue<*, *>
         val valueString = if (typedValue is RegistryListValue<*, *>) {
             val collection = typedValue.get() as Collection<Any>
@@ -750,6 +800,8 @@ class ClickGuiPanel(
                     else -> collection.joinToString(", ")
                 }
             } catch (e: Exception) {
+                // Log registry access error and fallback to generic representation
+                println("Registry access error for ${value.name}: ${e.message}")
                 collection.joinToString(", ")
             }
         } else {
@@ -764,13 +816,19 @@ class ClickGuiPanel(
                 try {
                     value.setByString(newValue)
                     saveModuleConfiguration(module)
-                } catch (e: Exception) { /* Ignore */ }
+                } catch (e: Exception) { /* Log parse error for debugging */ println("Parse error: ${e.message}") }
             }
         )
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun createColorWidget(value: Value<*>, widgetX: Int, widgetY: Int, widgetWidth: Int, module: ClientModule): TextSettingWidget {
+    private fun createColorWidget(
+        value: Value<*>, 
+        widgetX: Int, 
+        widgetY: Int, 
+        widgetWidth: Int, 
+        module: ClientModule
+    ): TextSettingWidget {
         val typedValue = value as Value<Color4b>
         return TextSettingWidget(
             name = value.name,
@@ -780,13 +838,19 @@ class ClickGuiPanel(
                 try {
                     value.setByString(newValue)
                     saveModuleConfiguration(module)
-                } catch (e: Exception) { /* Ignore */ }
+                } catch (e: Exception) { /* Log parse error for debugging */ println("Parse error: ${e.message}") }
             }
         )
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun createMultiChooseWidget(value: Value<*>, widgetX: Int, widgetY: Int, widgetWidth: Int, module: ClientModule): TextSettingWidget {
+    private fun createMultiChooseWidget(
+        value: Value<*>, 
+        widgetX: Int, 
+        widgetY: Int, 
+        widgetWidth: Int, 
+        module: ClientModule
+    ): TextSettingWidget {
         val typedValue = value as MultiChooseListValue<*>
         val valueString = typedValue.get().joinToString(", ") {
             if (it is Enum<*>) it.name else it.toString()
@@ -800,7 +864,7 @@ class ClickGuiPanel(
                 try {
                     value.setByString(newValue)
                     saveModuleConfiguration(module)
-                } catch (e: Exception) { /* Ignore */ }
+                } catch (e: Exception) { /* Log parse error for debugging */ println("Parse error: ${e.message}") }
             }
         )
     }
