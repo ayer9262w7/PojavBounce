@@ -27,13 +27,18 @@ import net.ccbluex.liquidbounce.common.RenderLayerExtensions;
 import net.ccbluex.liquidbounce.event.EventManager;
 import net.ccbluex.liquidbounce.event.events.ScreenRenderEvent;
 import net.ccbluex.liquidbounce.features.misc.HideAppearance;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.SplashOverlay;
+import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.texture.TextureManager;
+import net.minecraft.screen.ScreenTexts;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.ColorHelper;
+import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -48,17 +53,46 @@ import java.util.function.IntSupplier;
 @Mixin(SplashOverlay.class)
 public class MixinSplashOverlay {
 
+    @Shadow @Final private MinecraftClient client;
+
     @Unique
     private static final IntSupplier CLIENT_ARGB = () -> ColorHelper.getArgb(255, 24, 26, 27);
+
+    @Unique
+    private ButtonWidget skipButton;
+
+    @Unique
+    private boolean hasAutoAdvanced = false;
 
     @Inject(method = "init", at = @At("RETURN"))
     private static void initializeTexture(TextureManager textureManager, CallbackInfo ci) {
         textureManager.registerTexture(ClientLogoTexture.CLIENT_LOGO, new ClientLogoTexture());
     }
 
+    @Inject(method = "init", at = @At("RETURN"))
+    private void initSkipButton(CallbackInfo ci) {
+        if (HideAppearance.INSTANCE.isHidingNow()) {
+            return;
+        }
+
+        // Add skip button similar to MixinDownloadingTerrainScreen
+        SplashOverlay overlay = (SplashOverlay) (Object) this;
+        int width = client.getWindow().getScaledWidth();
+        int height = client.getWindow().getScaledHeight();
+        
+        skipButton = ButtonWidget.builder(ScreenTexts.PROCEED, button -> advanceToGame())
+                .dimensions(width / 2 - 100, height / 4 + 120 + 12, 200, 20)
+                .build();
+    }
+
     @Inject(method = "render", at = @At("RETURN"))
     private void render(DrawContext context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
         EventManager.INSTANCE.callEvent(new ScreenRenderEvent(context, delta));
+        
+        // Render skip button if not hiding appearance
+        if (!HideAppearance.INSTANCE.isHidingNow() && skipButton != null) {
+            skipButton.render(context, mouseX, mouseY, delta);
+        }
     }
 
     @WrapWithCondition(method = "render", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/DrawContext;drawTexture(Ljava/util/function/Function;Lnet/minecraft/util/Identifier;IIFFIIIIIII)V"))
@@ -111,9 +145,33 @@ public class MixinSplashOverlay {
         );
     }
 
+    @Inject(method = "render", at = @At(value = "INVOKE", target = "Lnet/minecraft/resource/ResourceReload;getProgress()F", shift = At.Shift.AFTER))
+    private void checkAutoAdvance(
+            DrawContext context,
+            int mouseX,
+            int mouseY,
+            float delta,
+            CallbackInfo ci,
+            @Local(name = "f", index = 14) float progress
+    ) {
+        // Auto-advance when progress reaches 100% (1.0f)
+        if (!hasAutoAdvanced && progress >= 1.0f) {
+            hasAutoAdvanced = true;
+            advanceToGame();
+        }
+    }
+
     @ModifyExpressionValue(method = "render", at = @At(value = "FIELD", target = "Lnet/minecraft/client/gui/screen/SplashOverlay;BRAND_ARGB:Ljava/util/function/IntSupplier;"))
     private IntSupplier withClientColor(IntSupplier original) {
         return HideAppearance.INSTANCE.isHidingNow() ? original : CLIENT_ARGB;
+    }
+
+    @Unique
+    private void advanceToGame() {
+        // Advance to the main game, similar to how DownloadingTerrainScreen proceeds
+        if (client != null) {
+            client.setScreen(null);
+        }
     }
 
 }
