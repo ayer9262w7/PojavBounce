@@ -87,6 +87,9 @@ public class MixinSplashOverlay {
 
     @Unique
     private boolean wasMousePressed = false;
+    
+    @Unique
+    private boolean wasMousePressedInsideButton = false;
 
     @Inject(method = "render", at = @At("RETURN"))
     private void render(DrawContext context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
@@ -102,9 +105,21 @@ public class MixinSplashOverlay {
                 org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT
             ) == org.lwjgl.glfw.GLFW.GLFW_PRESS;
             
-            // Detect click (press and release)
-            if (wasMousePressed && !isMousePressed && skipButton.isMouseOver(mouseX, mouseY)) {
+            boolean isMouseOverButton = skipButton.isMouseOver(mouseX, mouseY);
+            
+            // Track if mouse was pressed while over the button
+            if (!wasMousePressed && isMousePressed && isMouseOverButton) {
+                wasMousePressedInsideButton = true;
+            }
+            
+            // Detect click (press and release both inside button)
+            if (wasMousePressed && !isMousePressed && isMouseOverButton && wasMousePressedInsideButton) {
                 advanceToGame();
+            }
+            
+            // Reset when mouse is released
+            if (!isMousePressed) {
+                wasMousePressedInsideButton = false;
             }
             
             wasMousePressed = isMousePressed;

@@ -32,6 +32,7 @@ class MixinSplashOverlayTest {
         var hasAutoAdvanced = false
         var gameAdvanced = false
         var wasMousePressed = false
+        var wasMousePressedInsideButton = false
 
         fun checkAutoAdvance(progress: Float) {
             // Simulate the auto-advance logic from MixinSplashOverlay.checkAutoAdvance
@@ -43,11 +44,21 @@ class MixinSplashOverlayTest {
 
         fun handleMouseClick(mouseX: Int, mouseY: Int, isMousePressed: Boolean, buttonBounds: ButtonBounds) {
             // Simulate the mouse click logic from MixinSplashOverlay.render
-            val isMouseOver = buttonBounds.isMouseOver(mouseX, mouseY)
+            val isMouseOverButton = buttonBounds.isMouseOver(mouseX, mouseY)
             
-            // Detect click (press and release)
-            if (wasMousePressed && !isMousePressed && isMouseOver) {
+            // Track if mouse was pressed while over the button
+            if (!wasMousePressed && isMousePressed && isMouseOverButton) {
+                wasMousePressedInsideButton = true
+            }
+            
+            // Detect click (press and release both inside button)
+            if (wasMousePressed && !isMousePressed && isMouseOverButton && wasMousePressedInsideButton) {
                 advanceToGame()
+            }
+            
+            // Reset when mouse is released
+            if (!isMousePressed) {
+                wasMousePressedInsideButton = false
             }
             
             wasMousePressed = isMousePressed
@@ -62,6 +73,7 @@ class MixinSplashOverlayTest {
             hasAutoAdvanced = false
             gameAdvanced = false
             wasMousePressed = false
+            wasMousePressedInsideButton = false
         }
     }
 
