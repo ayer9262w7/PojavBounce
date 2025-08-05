@@ -291,6 +291,9 @@ class MixinSplashOverlayTest {
                     }
                 } catch (e: Exception) {
                     // Simulate exception handling (like in our try-catch blocks)
+                    // We intentionally catch and ignore exceptions to prevent crashes during early loading
+                    // In the actual implementation, this prevents texture atlas initialization errors
+                    println("Simulated texture exception caught and handled: ${e.javaClass.simpleName}")
                     exceptionThrown = true
                 }
             }
@@ -342,6 +345,9 @@ class MixinSplashOverlayTest {
                     }
                 } catch (e: Exception) {
                     // Simulate exception handling - retry next frame
+                    // We intentionally catch exceptions to prevent crashes during early loading
+                    // In the actual implementation, this prevents button creation failures
+                    println("Simulated button creation exception caught: ${e.javaClass.simpleName}")
                     retryNextFrame = true
                 }
             }
@@ -352,15 +358,30 @@ class MixinSplashOverlayTest {
         // Test button creation when texture system is not ready
         buttonTester.textureSystemReady = false
         buttonTester.attemptButtonCreation()
-        assertFalse(buttonTester.buttonCreationAttempted, "Button creation should not be attempted when texture system is not ready")
-        assertFalse(buttonTester.buttonCreated, "Button should not be created when texture system is not ready")
+        assertFalse(
+            buttonTester.buttonCreationAttempted, 
+            "Button creation should not be attempted when texture system is not ready"
+        )
+        assertFalse(
+            buttonTester.buttonCreated,
+            "Button should not be created when texture system is not ready"
+        )
         
         // Test button creation when texture system is ready
         buttonTester.textureSystemReady = true
         buttonTester.attemptButtonCreation()
-        assertTrue(buttonTester.buttonCreationAttempted, "Button creation should be attempted when texture system is ready")
-        assertTrue(buttonTester.buttonCreated, "Button should be created when texture system is ready")
-        assertFalse(buttonTester.retryNextFrame, "No retry should be needed when texture system is ready")
+        assertTrue(
+            buttonTester.buttonCreationAttempted,
+            "Button creation should be attempted when texture system is ready"
+        )
+        assertTrue(
+            buttonTester.buttonCreated, 
+            "Button should be created when texture system is ready"
+        )
+        assertFalse(
+            buttonTester.retryNextFrame,
+            "No retry should be needed when texture system is ready"
+        )
         
         println("✓ Button creation safety prevents crashes during early initialization")
     }
