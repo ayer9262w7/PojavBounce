@@ -21,7 +21,6 @@ package net.ccbluex.liquidbounce.injection.mixins.minecraft.gui;
 
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.injector.v2.WrapWithCondition;
-import com.llamalad7.mixinextras.sugar.Local;
 import net.ccbluex.liquidbounce.common.ClientLogoTexture;
 import net.ccbluex.liquidbounce.common.RenderLayerExtensions;
 import net.ccbluex.liquidbounce.event.EventManager;
@@ -64,25 +63,12 @@ public class MixinSplashOverlay {
     @Unique
     private boolean hasAutoAdvanced = false;
 
+    @Unique
+    private boolean skipButtonInitialized = false;
+
     @Inject(method = "init", at = @At("RETURN"))
     private static void initializeTexture(TextureManager textureManager, CallbackInfo ci) {
         textureManager.registerTexture(ClientLogoTexture.CLIENT_LOGO, new ClientLogoTexture());
-    }
-
-    @Inject(method = "init", at = @At("RETURN"))
-    private void initSkipButton(CallbackInfo ci) {
-        if (HideAppearance.INSTANCE.isHidingNow()) {
-            return;
-        }
-
-        // Add skip button similar to MixinDownloadingTerrainScreen
-        SplashOverlay overlay = (SplashOverlay) (Object) this;
-        int width = client.getWindow().getScaledWidth();
-        int height = client.getWindow().getScaledHeight();
-        
-        skipButton = ButtonWidget.builder(ScreenTexts.PROCEED, button -> advanceToGame())
-                .dimensions(width / 2 - 100, height / 4 + 120 + 12, 200, 20)
-                .build();
     }
 
     @Unique
@@ -94,6 +80,17 @@ public class MixinSplashOverlay {
     @Inject(method = "render", at = @At("RETURN"))
     private void render(DrawContext context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
         EventManager.INSTANCE.callEvent(new ScreenRenderEvent(context, delta));
+        
+        // Initialize skip button on first render if not hiding appearance
+        if (!skipButtonInitialized && !HideAppearance.INSTANCE.isHidingNow()) {
+            int width = client.getWindow().getScaledWidth();
+            int height = client.getWindow().getScaledHeight();
+            
+            skipButton = ButtonWidget.builder(ScreenTexts.PROCEED, button -> advanceToGame())
+                    .dimensions(width / 2 - 100, height / 4 + 120 + 12, 200, 20)
+                    .build();
+            skipButtonInitialized = true;
+        }
         
         // Render skip button if not hiding appearance
         if (!HideAppearance.INSTANCE.isHidingNow() && skipButton != null) {
@@ -137,10 +134,7 @@ public class MixinSplashOverlay {
             int mouseX,
             int mouseY,
             float delta,
-            CallbackInfo ci,
-            @Local(name = "i", index = 5) int scaledWindowWidth,
-            @Local(name = "j", index = 6) int scaledWindowHeight,
-            @Local(name = "s", index = 20) int color
+            CallbackInfo ci
     ) {
         // Don't draw the logo if the appearance is hidden
         if (HideAppearance.INSTANCE.isHidingNow()) {
@@ -157,6 +151,9 @@ public class MixinSplashOverlay {
 
         int x = (screenWidth - displayWidth) / 2;
         int y = (screenHeight - displayHeight) / 2;
+
+        // Use the same color as the original brand color
+        int color = ColorHelper.getArgb(255, 24, 26, 27);
 
         // TODO: Draw as SVG instead of PNG
         context.drawTexture(
@@ -176,17 +173,25 @@ public class MixinSplashOverlay {
         );
     }
 
+    @Unique
+    private float lastProgress = 0.0f;
+
+    @ModifyExpressionValue(method = "render", at = @At(value = "INVOKE", target = "Lnet/minecraft/resource/ResourceReload;getProgress()F"))
+    private float captureProgress(float progress) {
+        lastProgress = progress;
+        return progress;
+    }
+
     @Inject(method = "render", at = @At(value = "INVOKE", target = "Lnet/minecraft/resource/ResourceReload;getProgress()F", shift = At.Shift.AFTER))
     private void checkAutoAdvance(
             DrawContext context,
             int mouseX,
             int mouseY,
             float delta,
-            CallbackInfo ci,
-            @Local(name = "f", index = 14) float progress
+            CallbackInfo ci
     ) {
         // Auto-advance when progress reaches 100% (1.0f)
-        if (!hasAutoAdvanced && progress >= 1.0f) {
+        if (!hasAutoAdvanced && lastProgress >= 1.0f) {
             hasAutoAdvanced = true;
             advanceToGame();
         }
