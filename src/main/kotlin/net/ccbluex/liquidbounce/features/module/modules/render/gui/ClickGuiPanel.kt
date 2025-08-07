@@ -137,47 +137,12 @@ class ClickGuiPanel(
     }
     
     private fun renderModules(context: DrawContext, mouseX: Int, mouseY: Int) {
-        val moduleAreaY = y + headerHeight
-        val totalContentHeight = filteredModules.sumOf { module ->
-            var height = moduleHeight
-            if (expandedModules.getOrDefault(module, false)) {
-                height += (moduleSettingWidgets[module]?.size ?: 0) * (SETTING_HEIGHT + SETTING_SPACING)
-            }
-            height
-        }
-        val moduleAreaHeight = min(totalContentHeight, GuiConfig.panelMaxHeight)
+        val moduleAreaData = calculateModuleAreaData()
         
         // Clip rendering to module area
-        context.enableScissor(x, moduleAreaY, x + width, moduleAreaY + moduleAreaHeight)
+        context.enableScissor(x, moduleAreaData.y, x + width, moduleAreaData.y + moduleAreaData.height)
         
-        var currentY = moduleAreaY - scrollOffset
-        
-        for (module in filteredModules) {
-            if (currentY >= moduleAreaY + moduleAreaHeight) break // Stop rendering if below visible area
-
-            // Render the module itself
-            if (currentY + moduleHeight > moduleAreaY && currentY < moduleAreaY + moduleAreaHeight) {
-                renderModule(ModuleRenderData(context, module, x, currentY, mouseX, mouseY))
-            }
-            currentY += moduleHeight
-            
-            // Render settings if module is expanded
-            if (expandedModules.getOrDefault(module, false)) {
-                val settingsWidgets = moduleSettingWidgets[module] ?: emptyList()
-                for (widget in settingsWidgets) {
-                    if (currentY >= moduleAreaY + moduleAreaHeight) break
-                    
-                    if (currentY + SETTING_HEIGHT > moduleAreaY && currentY < moduleAreaY + moduleAreaHeight) {
-                        // Update widget position and render
-                        widget.y = currentY
-                        val isHovered = mouseX >= x && mouseX <= x + width && 
-                                      mouseY >= currentY && mouseY <= currentY + SETTING_HEIGHT
-                        widget.render(context, mouseX, mouseY, isHovered)
-                    }
-                    currentY += SETTING_HEIGHT + SETTING_SPACING
-                }
-            }
-        }
+        renderFilteredModules(context, mouseX, mouseY, moduleAreaData)
         
         context.disableScissor()
         
@@ -190,9 +155,90 @@ class ClickGuiPanel(
         }
 
         // Scrollbar if needed
-        if (totalContentHeight > moduleAreaHeight) {
-            renderScrollbar(context, moduleAreaY, moduleAreaHeight, totalContentHeight)
+        if (moduleAreaData.totalContentHeight > moduleAreaData.height) {
+            renderScrollbar(context, moduleAreaData.y, moduleAreaData.height, moduleAreaData.totalContentHeight)
         }
+    }
+    
+    private data class ModuleAreaData(
+        val y: Int,
+        val height: Int,
+        val totalContentHeight: Int
+    )
+    
+    private fun calculateModuleAreaData(): ModuleAreaData {
+        val moduleAreaY = y + headerHeight
+        val totalContentHeight = filteredModules.sumOf { module ->
+            var height = moduleHeight
+            if (expandedModules.getOrDefault(module, false)) {
+                height += (moduleSettingWidgets[module]?.size ?: 0) * (SETTING_HEIGHT + SETTING_SPACING)
+            }
+            height
+        }
+        val moduleAreaHeight = min(totalContentHeight, GuiConfig.panelMaxHeight)
+        
+        return ModuleAreaData(moduleAreaY, moduleAreaHeight, totalContentHeight)
+    }
+    
+    private data class RenderContext(
+        val context: DrawContext,
+        val mouseX: Int,
+        val mouseY: Int,
+        val moduleAreaData: ModuleAreaData
+    )
+    
+    private fun renderFilteredModules(context: DrawContext, mouseX: Int, mouseY: Int, moduleAreaData: ModuleAreaData) {
+        val renderContext = RenderContext(context, mouseX, mouseY, moduleAreaData)
+        var currentY = moduleAreaData.y - scrollOffset
+        
+        for (module in filteredModules) {
+            if (currentY >= moduleAreaData.y + moduleAreaData.height) break
+            
+            currentY = renderSingleModule(renderContext, module, currentY)
+        }
+    }
+    
+    private fun renderSingleModule(renderContext: RenderContext, module: ClientModule, initialY: Int): Int {
+        var currentY = initialY
+        
+        // Render the module itself
+        if (isInVisibleArea(currentY, moduleHeight, renderContext.moduleAreaData)) {
+            val moduleData = ModuleRenderData(
+                renderContext.context, module, x, currentY, renderContext.mouseX, renderContext.mouseY
+            )
+            renderModule(moduleData)
+        }
+        currentY += moduleHeight
+        
+        // Render settings if module is expanded
+        if (expandedModules.getOrDefault(module, false)) {
+            currentY = renderModuleSettings(renderContext, module, currentY)
+        }
+        
+        return currentY
+    }
+    
+    private fun renderModuleSettings(renderContext: RenderContext, module: ClientModule, initialY: Int): Int {
+        var currentY = initialY
+        val settingsWidgets = moduleSettingWidgets[module] ?: emptyList()
+        
+        for (widget in settingsWidgets) {
+            if (currentY >= renderContext.moduleAreaData.y + renderContext.moduleAreaData.height) break
+            
+            if (isInVisibleArea(currentY, SETTING_HEIGHT, renderContext.moduleAreaData)) {
+                widget.y = currentY
+                val isHovered = renderContext.mouseX >= x && renderContext.mouseX <= x + width && 
+                              renderContext.mouseY >= currentY && renderContext.mouseY <= currentY + SETTING_HEIGHT
+                widget.render(renderContext.context, renderContext.mouseX, renderContext.mouseY, isHovered)
+            }
+            currentY += SETTING_HEIGHT + SETTING_SPACING
+        }
+        
+        return currentY
+    }
+    
+    private fun isInVisibleArea(y: Int, height: Int, moduleAreaData: ModuleAreaData): Boolean {
+        return y + height > moduleAreaData.y && y < moduleAreaData.y + moduleAreaData.height
     }
     
     

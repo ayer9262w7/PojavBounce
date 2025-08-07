@@ -41,7 +41,9 @@ object DeepLearningEngine {
         System.getProperty("java.vm.name")?.contains("Android", ignoreCase = true) == true ||
         System.getProperty("java.runtime.name")?.contains("Android", ignoreCase = true) == true ||
         File("/system/build.prop").exists()
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        // Log Android detection failures instead of swallowing
+        System.err.println("Android detection failed: ${e.message}")
         false
     }
 
@@ -50,7 +52,9 @@ object DeepLearningEngine {
      */
     private val isFCL: Boolean = try {
         isAndroid && File("/data/data/com.tungsten.fcl").exists()
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        // Log FCL detection failures instead of swallowing
+        System.err.println("FCL detection failed: ${e.message}")
         false
     }
 
@@ -119,12 +123,15 @@ object DeepLearningEngine {
                     try {
                         rootFolder.resolve("deeplearning").apply { mkdirs() }
                     } catch (e: Exception) {
+                        // Log rootFolder access failure before falling back
+                        System.err.println("rootFolder access failed: ${e.message}")
                         fallbackDir.resolve("deeplearning").apply { mkdirs() }
                     }
                 }
             }
         } catch (e: Exception) {
-            // Fallback for any initialization issues
+            // Fallback for any initialization issues - log the error
+            System.err.println("DeepLearning initialization warning: ${e.message}")
             File(System.getProperty("java.io.tmpdir", "."), "liquidbounce-test/deeplearning").apply { mkdirs() }
         }
     }
@@ -192,6 +199,8 @@ object DeepLearningEngine {
                 it.className.contains("junit") || it.className.contains("Test") 
             }
         } catch (e: Exception) {
+            // Log test environment detection failure
+            System.err.println("Test environment detection failed: ${e.message}")
             false
         }
     }
