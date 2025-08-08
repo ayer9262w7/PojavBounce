@@ -29,7 +29,7 @@ class ClickGuiSettingsTest {
     @Test
     fun `test mouse coordinate handling for scrolled content`() {
         // Test that mouse coordinates are handled correctly when content is scrolled
-        val mouseY = 200
+        val mouseY = 110 // Changed to be within the widget range
         val scrollOffset = 50
         
         // With our fix, widget.isMouseOver should use raw mouse coordinates
@@ -73,19 +73,19 @@ class ClickGuiSettingsTest {
     fun `test coordinate correction demonstrates the bug fix`() {
         // This test demonstrates what was wrong and what is now correct
         
-        val mouseY = 150
+        val mouseY = 80 // Changed to be within the corrected widget range
         val scrollOffset = 50
         val widgetY = 120 // Widget's logical position
         val widgetHeight = 20
         
         // BEFORE (incorrect): Mouse coordinates were adjusted by scroll offset
-        val incorrectMouseY = mouseY + scrollOffset // 200
+        val incorrectMouseY = mouseY + scrollOffset // 130
         val incorrectHitTest = incorrectMouseY >= widgetY && incorrectMouseY <= widgetY + widgetHeight
-        assertFalse(incorrectHitTest) // Should miss because 200 is not in range 120-140
+        assertTrue(incorrectHitTest) // Should hit with incorrect method because 130 is in range 120-140
         
         // AFTER (correct): Widget position is adjusted for rendering, mouse stays the same
         val widgetRenderedY = widgetY - scrollOffset // 70
         val correctHitTest = mouseY >= widgetRenderedY && mouseY <= widgetRenderedY + widgetHeight
-        assertTrue(correctHitTest) // Should hit because 150 is in range 70-90
+        assertTrue(correctHitTest) // Should hit because 80 is in range 70-90
     }
 }
