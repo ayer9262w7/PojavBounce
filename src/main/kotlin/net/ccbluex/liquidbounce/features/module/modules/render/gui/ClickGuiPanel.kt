@@ -148,10 +148,9 @@ class ClickGuiPanel(
         
         // Render open dropdown outside scissor
         openDropdown?.let { dropdown ->
-            context.matrices.push()
-            context.matrices.translate(0.0, -scrollOffset, 0.0)
-            dropdown.render(context, mouseX, (mouseY + scrollOffset).toInt(), true)
-            context.matrices.pop()
+            // The dropdown's position is already relative to the screen, so we don't need to translate.
+            // We pass the raw mouse coordinates as the widget will handle hover checks internally.
+            dropdown.render(context, mouseX, mouseY, true)
         }
 
         // Scrollbar if needed
@@ -489,7 +488,8 @@ class ClickGuiPanel(
 
     private fun handleOpenDropdownClick(mouseX: Double, mouseY: Double, button: Int): Boolean {
         openDropdown?.let { dropdown ->
-            if (dropdown.mouseClicked(mouseX, mouseY + scrollOffset, button)) {
+            // Pass raw mouse coordinates as widget positions are screen-relative.
+            if (dropdown.mouseClicked(mouseX, mouseY, button)) {
                 if (!dropdown.isDropdownOpen) {
                     openDropdown = null
                 }
