@@ -553,16 +553,28 @@ class ClickGuiPanel(
         }
 
         // Delegate drag to setting widgets
-        moduleSettingWidgets.values.flatten().forEach { widget ->
-            // Ensure widget has correct position for hit testing
-            widget.x = x + 10 // Update x position
-            if (widget.isMouseOver(mouseX.toInt(), mouseY.toInt())) {
-                when (widget) {
-                    is FloatSettingWidget -> widget.mouseDragged(mouseX, mouseY, button)
-                    is IntSettingWidget -> widget.mouseDragged(mouseX, mouseY, button)
+        if (button == 0) {
+            var currentY = y + headerHeight - scrollOffset.toInt()
+            for (module in filteredModules) {
+                currentY += moduleHeight
+
+                if (expandedModules.getOrDefault(module, false)) {
+                    val widgets = moduleSettingWidgets[module] ?: continue
+                    for (widget in widgets) {
+                        widget.y = currentY // Update position before passing event
+
+                        // Let the widget handle the drag event; it knows if it's being dragged
+                        when (widget) {
+                            is FloatSettingWidget -> widget.mouseDragged(mouseX, mouseY, button)
+                            is IntSettingWidget -> widget.mouseDragged(mouseX, mouseY, button)
+                        }
+
+                        currentY += SETTING_HEIGHT + SETTING_SPACING
+                    }
                 }
             }
         }
+        
         return false
     }
     
