@@ -130,7 +130,9 @@ object ClickGuiPanelWidgetFactory {
         try {
             val actualValue = value.get()
             if (actualValue !is Boolean) {
-                println("Warning: Expected Boolean value but got ${actualValue::class.java.simpleName} for ${value.name}")
+                println(
+                    "Warning: Expected Boolean value but got ${actualValue::class.java.simpleName} for ${value.name}"
+                )
                 return null
             }
             
