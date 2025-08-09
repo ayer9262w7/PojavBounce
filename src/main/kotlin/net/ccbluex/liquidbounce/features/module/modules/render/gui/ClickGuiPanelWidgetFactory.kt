@@ -102,8 +102,12 @@ object ClickGuiPanelWidgetFactory {
             ValueType.INT -> createIntWidget(value, widgetX, widgetY, widgetWidth, module)
             ValueType.INT_RANGE -> createIntRangeAsTextWidget(value, widgetX, widgetY, widgetWidth, module)
             ValueType.CHOOSE, ValueType.CHOICE -> createEnumWidget(value, widgetX, widgetY, widgetWidth, module)
-            ValueType.TEXT, ValueType.BIND, ValueType.LIST, ValueType.BLOCK, ValueType.COLOR, ValueType.MULTI_CHOOSE ->
-                createTextWidget(value, widgetX, widgetY, widgetWidth, module)
+            ValueType.TEXT -> createTextWidget(value, widgetX, widgetY, widgetWidth, module)
+            ValueType.BIND -> createBindWidget(value, widgetX, widgetY, widgetWidth, module)
+            ValueType.KEY -> createKeyWidget(value, widgetX, widgetY, widgetWidth, module)
+            ValueType.LIST, ValueType.BLOCK -> createListWidget(value, widgetX, widgetY, widgetWidth, module)
+            ValueType.COLOR -> createColorWidget(value, widgetX, widgetY, widgetWidth, module)
+            ValueType.MULTI_CHOOSE -> createMultiChooseWidget(value, widgetX, widgetY, widgetWidth, module)
             else -> if (value is Configurable) {
                 createSectionHeaderWidget(value, widgetX, widgetY, widgetWidth, expandedSections)
             } else {
@@ -223,37 +227,10 @@ object ClickGuiPanelWidgetFactory {
         widgetWidth: Int, 
         module: ClientModule
     ): TextSettingWidget {
-        val displayValue = when (value.valueType) {
-            ValueType.TEXT -> {
-                val typedValue = value as Value<String>
-                typedValue.get()
-            }
-            ValueType.BIND -> {
-                val typedValue = value as Value<InputBind>
-                typedValue.get().boundKey.translationKey
-            }
-            ValueType.COLOR -> {
-                val typedValue = value as Value<Color4b>
-                "#" + typedValue.get().toARGB().toUInt().toString(16)
-            }
-            ValueType.MULTI_CHOOSE -> {
-                val typedValue = value as MultiChooseListValue<*>
-                typedValue.get().joinToString(", ") { if (it is Enum<*>) it.name else it.toString() }
-            }
-            ValueType.LIST, ValueType.BLOCK -> {
-                val typedValue = value as ListValue<*, *>
-                if (typedValue is RegistryListValue<*, *>) {
-                    formatRegistryListValue(typedValue)
-                } else {
-                    typedValue.get().joinToString(", ")
-                }
-            }
-            else -> value.toString()
-        }
-        
+        val typedValue = value as Value<String>
         return TextSettingWidget(
             name = value.name,
-            value = displayValue,
+            value = typedValue.get(),
             config = WidgetConfig(x = widgetX, y = widgetY, width = widgetWidth, height = SETTING_HEIGHT),
             onValueChanged = { newValue ->
                 try {
@@ -263,8 +240,134 @@ object ClickGuiPanelWidgetFactory {
                     } catch (e: Exception) {
                         println("Error saving configuration for module ${module.name}: ${e.message}")
                     }
-                } catch (e: Exception) { 
-                    println("Parse error: ${e.message}") 
+                } catch (e: Exception) {
+                    println("Parse error: ${e.message}")
+                }
+            }
+        )
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun createBindWidget(value: Value<*>, widgetX: Int, widgetY: Int, widgetWidth: Int, module: ClientModule): TextSettingWidget {
+        val typedValue = value as Value<InputBind>
+        return TextSettingWidget(
+            name = value.name,
+            value = typedValue.get().boundKey.translationKey,
+            config = WidgetConfig(x = widgetX, y = widgetY, width = widgetWidth, height = SETTING_HEIGHT),
+            onValueChanged = { newValue ->
+                try {
+                    value.setByString(newValue)
+                    try {
+                        ConfigSystem.storeConfigurable(module)
+                    } catch (e: Exception) {
+                        println("Error saving configuration for module ${module.name}: ${e.message}")
+                    }
+                } catch (e: Exception) {
+                    println("Parse error: ${e.message}")
+                }
+            }
+        )
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun createKeyWidget(value: Value<*>, widgetX: Int, widgetY: Int, widgetWidth: Int, module: ClientModule): TextSettingWidget {
+        val typedValue = value as Value<net.ccbluex.liquidbounce.utils.input.InputUtil.Key>
+        return TextSettingWidget(
+            name = value.name,
+            value = typedValue.get().translationKey,
+            config = WidgetConfig(x = widgetX, y = widgetY, width = widgetWidth, height = SETTING_HEIGHT),
+            onValueChanged = { newValue ->
+                try {
+                    value.setByString(newValue)
+                    try {
+                        ConfigSystem.storeConfigurable(module)
+                    } catch (e: Exception) {
+                        println("Error saving configuration for module ${module.name}: ${e.message}")
+                    }
+                } catch (e: Exception) {
+                    println("Parse error: ${e.message}")
+                }
+            }
+        )
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun createListWidget(value: Value<*>, widgetX: Int, widgetY: Int, widgetWidth: Int, module: ClientModule): TextSettingWidget {
+        val typedValue = value as ListValue<*, *>
+        val valueString = if (typedValue is RegistryListValue<*, *>) {
+            formatRegistryListValue(typedValue)
+        } else {
+            typedValue.get().joinToString(", ")
+        }
+
+        return TextSettingWidget(
+            name = value.name,
+            value = valueString,
+            config = WidgetConfig(x = widgetX, y = widgetY, width = widgetWidth, height = SETTING_HEIGHT),
+            onValueChanged = { newValue ->
+                try {
+                    value.setByString(newValue)
+                    try {
+                        ConfigSystem.storeConfigurable(module)
+                    } catch (e: Exception) {
+                        println("Error saving configuration for module ${module.name}: ${e.message}")
+                    }
+                } catch (e: Exception) {
+                    println("Parse error: ${e.message}")
+                }
+            }
+        )
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun createColorWidget(value: Value<*>, widgetX: Int, widgetY: Int, widgetWidth: Int, module: ClientModule): TextSettingWidget {
+        val typedValue = value as Value<Color4b>
+        return TextSettingWidget(
+            name = value.name,
+            value = "#" + typedValue.get().toARGB().toUInt().toString(16),
+            config = WidgetConfig(x = widgetX, y = widgetY, width = widgetWidth, height = SETTING_HEIGHT),
+            onValueChanged = { newValue ->
+                try {
+                    value.setByString(newValue)
+                    try {
+                        ConfigSystem.storeConfigurable(module)
+                    } catch (e: Exception) {
+                        println("Error saving configuration for module ${module.name}: ${e.message}")
+                    }
+                } catch (e: Exception) {
+                    println("Parse error: ${e.message}")
+                }
+            }
+        )
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun createMultiChooseWidget(
+        value: Value<*>,
+        widgetX: Int,
+        widgetY: Int,
+        widgetWidth: Int,
+        module: ClientModule
+    ): TextSettingWidget {
+        val typedValue = value as MultiChooseListValue<*>
+        val valueString = typedValue.get().joinToString(", ") {
+            if (it is Enum<*>) it.name else it.toString()
+        }
+
+        return TextSettingWidget(
+            name = value.name,
+            value = valueString,
+            config = WidgetConfig(x = widgetX, y = widgetY, width = widgetWidth, height = SETTING_HEIGHT),
+            onValueChanged = { newValue ->
+                try {
+                    value.setByString(newValue)
+                    try {
+                        ConfigSystem.storeConfigurable(module)
+                    } catch (e: Exception) {
+                        println("Error saving configuration for module ${module.name}: ${e.message}")
+                    }
+                } catch (e: Exception) {
+                    println("Parse error: ${e.message}")
                 }
             }
         )
@@ -275,11 +378,11 @@ object ClickGuiPanelWidgetFactory {
         val collection = value.get() as Collection<Any>
         return try {
             when (value.innerType) {
-                Block::class.java -> collection.joinToString(", ") { 
-                    Registries.BLOCK.getId(it as Block).toString() 
+                Block::class.java -> collection.joinToString(", ") {
+                    Registries.BLOCK.getId(it as Block).toString()
                 }
-                Item::class.java -> collection.joinToString(", ") { 
-                    Registries.ITEM.getId(it as Item).toString() 
+                Item::class.java -> collection.joinToString(", ") {
+                    Registries.ITEM.getId(it as Item).toString()
                 }
                 else -> collection.joinToString(", ")
             }
