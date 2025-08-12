@@ -630,6 +630,16 @@ class ModuleSettingsPopup(
                         return true
                     }
                 }
+                is FloatRangeSliderWidget -> {
+                    if (widget.mouseDragged(mouseX, localMouseY, button)) {
+                        return true
+                    }
+                }
+                is IntRangeSliderWidget -> {
+                    if (widget.mouseDragged(mouseX, localMouseY, button)) {
+                        return true
+                    }
+                }
             }
         }
         
@@ -649,6 +659,8 @@ class ModuleSettingsPopup(
             when (widget) {
                 is FloatSettingWidget -> widget.mouseReleased(mouseX, localMouseY, button)
                 is IntSettingWidget -> widget.mouseReleased(mouseX, localMouseY, button)
+                is FloatRangeSliderWidget -> widget.mouseReleased(mouseX, localMouseY, button)
+                is IntRangeSliderWidget -> widget.mouseReleased(mouseX, localMouseY, button)
             }
         }
         

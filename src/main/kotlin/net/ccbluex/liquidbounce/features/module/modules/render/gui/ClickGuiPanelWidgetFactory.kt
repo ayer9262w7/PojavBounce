@@ -556,14 +556,11 @@ object ClickGuiPanelWidgetFactory {
 
     /**
      * Determine if a range value should use dual sliders instead of text input
+     * Now returns true for ALL range values to provide better UX
      */
     private fun shouldUseDualSlider(valueName: String): Boolean {
-        val lowerName = valueName.lowercase()
-        return lowerName.contains("cps") || 
-               lowerName.contains("clicks") ||
-               lowerName.contains("delay") ||
-               lowerName.contains("speed") ||
-               lowerName.contains("rate")
+        // Always use dual sliders for range values to provide better UX
+        return true
     }
 
     @Suppress("UNCHECKED_CAST")
