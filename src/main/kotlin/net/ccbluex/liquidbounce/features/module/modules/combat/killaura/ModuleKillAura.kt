@@ -92,6 +92,9 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
     }
 
+    // === CÀI ĐẶT MỚI ===
+    private val samePlayer by boolean("SamePlayer", false)
+
     private val scanExtraRange by floatRange("ScanExtraRange", 2.0f..3.0f, 0.0f..7.0f).onChanged { range ->
         currentScanExtraRange = range.random()
     }
@@ -136,6 +139,8 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         failedHits.clear()
         KillAuraAutoBlock.stopBlocking()
         KillAuraNotifyWhenFail.failedHitsIncrement = 0
+        // === DÒNG MỚI ===
+        targetTracker.stickyTarget = null
     }
 
     @Suppress("unused")
@@ -168,6 +173,8 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         if (isInInventoryScreen && !ignoreOpenInventory || shouldResetTarget) {
             // Reset current target
             targetTracker.reset()
+            // === DÒNG MỚI ===
+            targetTracker.stickyTarget = null
             return@handler
         }
 
@@ -296,6 +303,12 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
                 // Attack enemy
                 target.attack(true, keepSprint && !shouldBlockSprinting)
+
+                // === LOGIC MỚI: NHỚ MỤC TIÊU SAU KHI TẤN CÔNG ===
+                if (samePlayer && target is LivingEntity) {
+                    targetTracker.stickyTarget = target
+                }
+
                 currentScanExtraRange = scanExtraRange.random()
                 KillAuraNotifyWhenFail.failedHitsIncrement = 0
 
@@ -323,6 +336,19 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
         ModuleDebug.debugParameter(ModuleKillAura, "AimSituation", situation)
 
+        // === LOGIC MỚI: ƯU TIÊN MỤC TIÊU ĐÃ KHÓA ===
+        if (samePlayer) {
+            val sticky = targetTracker.stickyTarget
+            // Check if the locked target is still valid
+            if (sticky != null && sticky.isAlive && player.squaredBoxedDistanceTo(sticky) <= range.pow(2) && targetTracker.validate(sticky)) {
+                targetTracker.target = sticky // Set current target to the locked target
+                processTarget(sticky, range, situation) // Process rotations etc.
+                return // Skip searching for a new target
+            } else {
+                targetTracker.stickyTarget = null // Clear locked target if it's no longer valid
+            }
+        }
+        
         // Calculate maximum range based on enemy distance
         val maximumRange = if (targetTracker.closestSquaredEnemyDistance > range.pow(2)) {
             range + currentScanExtraRange
@@ -408,11 +434,11 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
      * @param entity The entity to attack
      * @param range The range to attack the entity (NOT SQUARED)
      * @param situation The aim situation we are in
-     *  - [PointTracker.AimSituation.FOR_NOW] if we are going to attack the entity on the current tick (ON_TICK)
-     *  - [PointTracker.AimSituation.FOR_THE_FUTURE] if we are going to attack the entity in the future
-     *  - [PointTracker.AimSituation.FOR_NEXT_TICK] if we are going to attack the entity on the next tick
+     * - [PointTracker.AimSituation.FOR_NOW] if we are going to attack the entity on the current tick (ON_TICK)
+     * - [PointTracker.AimSituation.FOR_THE_FUTURE] if we are going to attack the entity in the future
+     * - [PointTracker.AimSituation.FOR_NEXT_TICK] if we are going to attack the entity on the next tick
      *
-     *  @return The best spot to attack the entity
+     * @return The best spot to attack the entity
      */
     private fun getSpot(entity: LivingEntity, range: Double,
                         situation: PointTracker.AimSituation): RotationWithVector? {

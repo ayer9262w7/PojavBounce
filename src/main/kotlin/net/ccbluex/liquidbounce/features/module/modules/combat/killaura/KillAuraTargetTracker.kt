@@ -30,6 +30,8 @@ import net.minecraft.item.AxeItem
 
 object KillAuraTargetTracker : TargetTracker() {
 
+    internal var stickyTarget: LivingEntity? = null // <-- THÊM DÒNG NÀY
+
     /**
      * Allows to ignore when the target is holding a shield,
      * which would normally block attacks.
