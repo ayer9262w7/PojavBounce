@@ -71,18 +71,11 @@ import net.minecraft.entity.Entity
 import net.minecraft.entity.LivingEntity
 import kotlin.math.pow
 
-/**
- * KillAura module
- *
- * Automatically attacks enemies.
- */
 @Suppress("MagicNumber")
 object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
-    // Attack speed
     val clickScheduler = tree(KillAuraClicker)
-
-    // Range
+    
     internal val range by float("Range", 4.2f, 1f..8f)
     internal val wallRange by float("WallRange", 3f, 0f..8f).onChange { wallRange ->
         if (wallRange > range) {
@@ -92,34 +85,26 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
     }
 
-    // === CÁC CÀI ĐẶT MỚI ===
     val samePlayer by boolean("SamePlayer", false)
-    private val samePlayerDuration by int("SamePlayerDuration", 5, 1..120, "s") { samePlayer }
+    // === SỬA LẠI CÚ PHÁP CỦA DÒNG NÀY ===
+    private val samePlayerDuration by int("SamePlayerDuration", 5, 1..120, "s").displayable { samePlayer }
 
     private val scanExtraRange by floatRange("ScanExtraRange", 2.0f..3.0f, 0.0f..7.0f).onChanged { range ->
         currentScanExtraRange = range.random()
     }
     private var currentScanExtraRange: Float = scanExtraRange.random()
 
-    // Target
     val targetTracker = tree(KillAuraTargetTracker)
-
-    // Rotation
     private val rotations = tree(KillAuraRotationsConfigurable)
-
     private val pointTracker = tree(PointTracker())
-
     private val requires by multiEnumChoice<KillAuraRequirements>("Requires")
-
     private val requirementsMet
         get() = requires.all { it.meets() }
 
-    // Bypass techniques
     internal val raycast by enumChoice("Raycast", TRACE_ALL)
     private val criticalsSelectionMode by enumChoice("Criticals", CriticalsSelectionMode.SMART)
     private val keepSprint by boolean("KeepSprint", true)
 
-    // Inventory Handling
     internal val ignoreOpenInventory by boolean("IgnoreOpenInventory", true)
     internal val simulateInventoryClosing by boolean("SimulateInventoryClosing", true)
 
@@ -127,7 +112,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         tree(KillAuraAutoBlock)
     }
 
-    // Target rendering
     private val targetRenderer = tree(WorldTargetRenderer(this))
 
     init {
@@ -146,7 +130,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     @Suppress("unused")
     private val renderHandler = handler<WorldRenderEvent> { event ->
         val matrixStack = event.matrixStack
-
         renderTarget(matrixStack, event.partialTicks)
         renderFailedHits(matrixStack)
     }
@@ -287,10 +270,9 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
                 target.attack(true, keepSprint && !shouldBlockSprinting)
 
-                // === CẬP NHẬT LOGIC ĐẶT LẠI ĐỒNG HỒ ===
                 if (samePlayer && target is LivingEntity) {
                     targetTracker.stickyTarget = target
-                    targetTracker.stickyTimer.reset() // Đặt lại đồng hồ mỗi khi tấn công
+                    targetTracker.stickyTimer.reset()
                 }
 
                 currentScanExtraRange = scanExtraRange.random()
@@ -319,17 +301,15 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
         ModuleDebug.debugParameter(ModuleKillAura, "AimSituation", situation)
 
-        // === CẬP NHẬT LOGIC KIỂM TRA THỜI GIAN ===
         if (samePlayer) {
             val sticky = targetTracker.stickyTarget
-            // Kiểm tra xem mục tiêu có còn hợp lệ và thời gian ghim chưa hết
             val timePassed = targetTracker.stickyTimer.hasTimePassed((samePlayerDuration * 1000).toLong())
             if (sticky != null && !timePassed && sticky.isAlive && player.squaredBoxedDistanceTo(sticky) <= range.pow(2) && targetTracker.validate(sticky)) {
                 targetTracker.target = sticky
                 processTarget(sticky, range, situation)
                 return
             } else {
-                targetTracker.stickyTarget = null // Xóa mục tiêu nếu không còn hợp lệ hoặc hết thời gian
+                targetTracker.stickyTarget = null
             }
         }
         
@@ -462,5 +442,4 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         TRACE_ONLYENEMY("Enemy"),
         TRACE_ALL("All")
     }
-
 }
