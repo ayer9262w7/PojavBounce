@@ -30,23 +30,18 @@ object KillAuraRotationsConfigurable : RotationsConfigurable(ModuleKillAura, com
 
     // Nhóm các setting của Acceleration vào một Configurable riêng
     object AccelerationSettings : Configurable("Acceleration Settings") {
-        // Các setting này giờ là "con" của Acceleration Settings
-        val yawAcceleration by float("YawAcceleration", 0.18f, 0.1f..1.5f)
-        val pitchAcceleration by float("PitchAcceleration", 0.25f, 0.1f..1.5f)
-        val dampingFactor by float("DampingFactor", 0.75f, 0.01f..1.0f)
-        val maxVelocity by float("MaxVelocity", 25.0f, 1.0f..100.0f)
+        val yawAcceleration by float("YawAcceleration", 0.18f, 0.1f..0.5f)
+        val pitchAcceleration by float("PitchAcceleration", 0.25f, 0.1f..0.5f)
+        val dampingFactor by float("DampingFactor", 0.75f, 0.5f..0.95f)
+        val maxVelocity by float("MaxVelocity", 25.0f, 10.0f..40.0f)
     }
 
-    // Khởi tạo nhóm setting và làm cho nó chỉ hiển thị khi cần
+    // Khởi tạo nhóm setting
     init {
-        tree(AccelerationSettings).displayable { aimingMode == AimingMode.ACCELERATION }
+        tree(AccelerationSettings)
     }
 
-    val smoothSpeed by float("SmoothSpeed", 0.15f, 0.05f..0.5f).displayable {
-        aimingMode == AimingMode.LINEAR ||
-        aimingMode == AimingMode.INTERPOLATION ||
-        aimingMode == AimingMode.SIGMOID
-    }
+    val smoothSpeed by float("SmoothSpeed", 0.15f, 0.05f..0.5f)
 
     enum class KillAuraRotationTiming(override val choiceName: String) : NamedChoice {
         NORMAL("Normal"),

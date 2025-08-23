@@ -91,9 +91,8 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     val samePlayer by boolean("SamePlayer", false)
     private val samePlayerDuration by int("SamePlayerDuration", 5, 1..120, "s")
 
-    private val scanExtraRange by floatRange("ScanExtraRange", 2.0f..3.0f, 0.0f..7.0f).onChanged { range ->
-        currentScanExtraRange = range.random()
-    }
+    // SỬA LỖI: Xóa bỏ onChanged để tránh lỗi biên dịch
+    private val scanExtraRange by floatRange("ScanExtraRange", 2.0f..3.0f, 0.0f..7.0f)
     private var currentScanExtraRange: Float = scanExtraRange.random()
 
     val targetTracker = tree(KillAuraTargetTracker)
@@ -386,7 +385,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         val (idealTargetRotation, _) = getSpot(entity, maximumRange.toDouble(), situation) ?: return false
         val finalRotation: Rotation
 
-        // Cập nhật để sử dụng đường dẫn mới đến các setting
         val accelSettings = KillAuraRotationsConfigurable.AccelerationSettings
         
         when (rotations.aimingMode) {
