@@ -32,7 +32,6 @@ import net.minecraft.item.AxeItem
 object KillAuraTargetTracker : TargetTracker() {
 
     internal var stickyTarget: LivingEntity? = null
-    // === THÊM ĐỒNG HỒ BẤM GIỜ ===
     internal val stickyTimer = MSTimer()
 
     /**
@@ -59,5 +58,4 @@ object KillAuraTargetTracker : TargetTracker() {
 
         return !entity.blockedByShield(world.damageSources.playerAttack(player)) || !entity.wouldBlockHit(player)
     }
-
 }
