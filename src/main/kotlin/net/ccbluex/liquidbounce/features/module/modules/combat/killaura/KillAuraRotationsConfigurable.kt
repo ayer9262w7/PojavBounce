@@ -26,10 +26,32 @@ object KillAuraRotationsConfigurable : RotationsConfigurable(ModuleKillAura, com
     val rotationTiming by enumChoice("RotationTiming", KillAuraRotationTiming.NORMAL)
     val aimThroughWalls by boolean("ThroughWalls", false)
 
+    // ===== CÁC SETTING MỚI CHO ANGLESmooth =====
+    val angleSmoothMode by enumChoice("AngleSmoothMode", AngleSmoothMode.ACCELERATION)
+
+    // Các setting này chỉ hiển thị khi chế độ là Acceleration
+    val yawAcceleration by float("YawAcceleration", 0.18f, 0.1f..0.5f)
+        .displayable { angleSmoothMode.get() == AngleSmoothMode.ACCELERATION }
+    val pitchAcceleration by float("PitchAcceleration", 0.25f, 0.1f..0.5f)
+        .displayable { angleSmoothMode.get() == AngleSmoothMode.ACCELERATION }
+    val dampingFactor by float("DampingFactor", 0.75f, 0.5f..0.95f)
+        .displayable { angleSmoothMode.get() == AngleSmoothMode.ACCELERATION }
+    val maxVelocity by float("MaxVelocity", 25.0f, 10.0f..40.0f)
+        .displayable { angleSmoothMode.get() == AngleSmoothMode.ACCELERATION }
+    // ===========================================
+
     enum class KillAuraRotationTiming(override val choiceName: String) : NamedChoice {
         NORMAL("Normal"),
         SNAP("Snap"),
         ON_TICK("OnTick")
     }
 
+    // Enum cho các chế độ AngleSmooth
+    enum class AngleSmoothMode(override val choiceName: String) : NamedChoice {
+        LINEAR("Linear"),
+        SIGMOID("Sigmoid"),
+        INTERPOLATION("Interpolation"),
+        ACCELERATION("Acceleration"),
+        MINARAI("Minarai")
+    }
 }
