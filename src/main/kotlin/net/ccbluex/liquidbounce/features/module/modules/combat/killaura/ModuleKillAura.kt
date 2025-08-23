@@ -96,7 +96,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     private var currentScanExtraRange: Float = scanExtraRange.random()
 
     val targetTracker = tree(KillAuraTargetTracker)
-    internal val rotations = tree(KillAuraRotationsConfigurable) // Sửa thành internal để truy cập từ file khác
+    internal val rotations = tree(KillAuraRotationsConfigurable)
     private val pointTracker = tree(PointTracker())
     private val requires by multiEnumChoice<KillAuraRequirements>("Requires")
     private val requirementsMet
@@ -109,12 +109,10 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     internal val ignoreOpenInventory by boolean("IgnoreOpenInventory", true)
     internal val simulateInventoryClosing by boolean("SimulateInventoryClosing", true)
 
-    // ===== BIẾN TRẠNG THÁI MỚI CHO ACCELERATION =====
     private var currentYaw: Float = 0.0f
     private var yawVelocity: Float = 0.0f
     private var currentPitch: Float = 0.0f
     private var pitchVelocity: Float = 0.0f
-    // =============================================
 
     init {
         tree(KillAuraAutoBlock)
@@ -384,9 +382,8 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         maximumRange: Float,
         situation: PointTracker.AimSituation
     ): Boolean {
-        // ===== BẮT ĐẦU LOGIC MỚI CHO CÁC CHẾ ĐỘ AIM =====
-        if (rotations.angleSmoothMode.get() == KillAuraRotationsConfigurable.AngleSmoothMode.ACCELERATION) {
-            // --- Chế độ Acceleration ---
+        // SỬA LỖI: Xóa bỏ .get()
+        if (rotations.angleSmoothMode == KillAuraRotationsConfigurable.AngleSmoothMode.ACCELERATION) {
             val (idealTargetRotation, _) = getSpot(entity, maximumRange.toDouble(), situation) ?: return false
 
             val yawDifference = normalizeAngleDifference(idealTargetRotation.yaw - currentYaw)
@@ -415,7 +412,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             )
             return true
         } else {
-            // --- Các chế độ khác (Logic cũ) ---
             val (rotation, _) = getSpot(entity, maximumRange.toDouble(), situation) ?: return false
             val ticks = rotations.calculateTicks(rotation)
             ModuleDebug.debugParameter(ModuleKillAura, "Rotation Ticks", ticks)
@@ -441,7 +437,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             )
             return true
         }
-        // ===== KẾT THÚC LOGIC MỚI =====
     }
     
     private fun getSpot(entity: LivingEntity, range: Double,
