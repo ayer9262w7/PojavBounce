@@ -73,6 +73,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.random.Random
 
 @Suppress("MagicNumber")
 object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
@@ -92,7 +93,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     private val samePlayerDuration by int("SamePlayerDuration", 5, 1..120, "s")
 
     private val scanExtraRange by floatRange("ScanExtraRange", 2.0f..3.0f, 0.0f..7.0f)
-    private var currentScanExtraRange: Float = 0f // Sẽ được khởi tạo trong enable()
+    private var currentScanExtraRange: Float = 0f
 
     val targetTracker = tree(KillAuraTargetTracker)
     internal val rotations = tree(KillAuraRotationsConfigurable)
@@ -131,7 +132,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
         yawVelocity = 0.0f
         pitchVelocity = 0.0f
-        currentScanExtraRange = scanExtraRange.random() // Khởi tạo giá trị ngẫu nhiên khi bật
+        currentScanExtraRange = generateRandomScanRange()
     }
 
     override fun disable() {
@@ -296,7 +297,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                     targetTracker.stickyTimer.reset()
                 }
 
-                currentScanExtraRange = scanExtraRange.random()
+                currentScanExtraRange = generateRandomScanRange()
                 KillAuraNotifyWhenFail.failedHitsIncrement = 0
 
                 GenericDebugRecorder.recordDebugInfo(ModuleKillAura, "attackEntity", JsonObject().apply {
@@ -528,6 +529,13 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
     private fun smoothStep(x: Float): Float {
         return x * x * (3.0f - 2.0f * x)
+    }
+
+    // SỬA LỖI: Thêm hàm mới để thay thế .random()
+    private fun generateRandomScanRange(): Float {
+        val range = scanExtraRange
+        if (range.endInclusive <= range.start) return range.start
+        return range.start + (range.endInclusive - range.start) * Random.nextFloat()
     }
 
     enum class RaycastMode(override val choiceName: String) : NamedChoice {
