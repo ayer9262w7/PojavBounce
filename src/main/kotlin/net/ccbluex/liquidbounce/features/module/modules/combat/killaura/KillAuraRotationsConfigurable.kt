@@ -29,12 +29,12 @@ object KillAuraRotationsConfigurable : RotationsConfigurable(ModuleKillAura, com
     // ===== CÁC SETTING MỚI CHO ANGLESmooth =====
     val angleSmoothMode by enumChoice("AngleSmoothMode", AngleSmoothMode.ACCELERATION)
 
-    // Các setting này chỉ hiển thị khi chế độ là Acceleration
-    // SỬA LỖI: Xóa bỏ .get() và sử dụng đúng cú pháp displayable
-    val yawAcceleration by float("YawAcceleration", 0.18f, 0.1f..0.5f).displayable { angleSmoothMode == AngleSmoothMode.ACCELERATION }
-    val pitchAcceleration by float("PitchAcceleration", 0.25f, 0.1f..0.5f).displayable { angleSmoothMode == AngleSmoothMode.ACCELERATION }
-    val dampingFactor by float("DampingFactor", 0.75f, 0.5f..0.95f).displayable { angleSmoothMode == AngleSmoothMode.ACCELERATION }
-    val maxVelocity by float("MaxVelocity", 25.0f, 10.0f..40.0f).displayable { angleSmoothMode == AngleSmoothMode.ACCELERATION }
+    // SỬA LỖI: Xóa bỏ .displayable để đảm bảo biên dịch thành công.
+    // Các setting này sẽ luôn hiển thị, nhưng chỉ có tác dụng khi AngleSmoothMode là Acceleration.
+    val yawAcceleration by float("YawAcceleration", 0.18f, 0.1f..0.5f)
+    val pitchAcceleration by float("PitchAcceleration", 0.25f, 0.1f..0.5f)
+    val dampingFactor by float("DampingFactor", 0.75f, 0.5f..0.95f)
+    val maxVelocity by float("MaxVelocity", 25.0f, 10.0f..40.0f)
     // ===========================================
 
     enum class KillAuraRotationTiming(override val choiceName: String) : NamedChoice {
@@ -52,3 +52,4 @@ object KillAuraRotationsConfigurable : RotationsConfigurable(ModuleKillAura, com
         MINARAI("Minarai")
     }
 }
+

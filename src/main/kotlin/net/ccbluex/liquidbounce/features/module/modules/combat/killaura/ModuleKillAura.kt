@@ -382,7 +382,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         maximumRange: Float,
         situation: PointTracker.AimSituation
     ): Boolean {
-        // SỬA LỖI: Xóa bỏ .get()
         if (rotations.angleSmoothMode == KillAuraRotationsConfigurable.AngleSmoothMode.ACCELERATION) {
             val (idealTargetRotation, _) = getSpot(entity, maximumRange.toDouble(), situation) ?: return false
 
