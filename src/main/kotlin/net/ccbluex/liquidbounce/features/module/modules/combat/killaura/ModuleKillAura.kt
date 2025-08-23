@@ -86,8 +86,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     }
 
     val samePlayer by boolean("SamePlayer", false)
-    // === SỬA LẠI DÒNG NÀY ĐỂ XÓA `.displayable` ===
-    private val samePlayerDuration by int("SamePlayerDuration", 5, 1..120, "s")
+    private val samePlayerDuration by int("SamePlayerDuration", 5, 1..120, "s").displayable { samePlayer }
 
     private val scanExtraRange by floatRange("ScanExtraRange", 2.0f..3.0f, 0.0f..7.0f).onChanged { range ->
         currentScanExtraRange = range.random()
@@ -301,18 +300,32 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
         ModuleDebug.debugParameter(ModuleKillAura, "AimSituation", situation)
 
+        // ===== BẮT ĐẦU LOGIC MỚI ĐÃ SỬA LỖI =====
         if (samePlayer) {
             val sticky = targetTracker.stickyTarget
-            val timePassed = targetTracker.stickyTimer.hasTimePassed((samePlayerDuration * 1000).toLong())
-            if (sticky != null && !timePassed && sticky.isAlive && player.squaredBoxedDistanceTo(sticky) <= range.pow(2) && targetTracker.validate(sticky)) {
-                targetTracker.target = sticky
-                processTarget(sticky, range, situation)
-                return
-            } else {
-                targetTracker.stickyTarget = null
+            if (sticky != null) {
+                // Điều kiện để "quên" mục tiêu: nó đã chết hoặc hết thời gian ghim.
+                val timePassed = targetTracker.stickyTimer.hasTimePassed((samePlayerDuration * 1000).toLong())
+                if (!sticky.isAlive || timePassed) {
+                    targetTracker.stickyTarget = null // Quên mục tiêu
+                } else {
+                    // Nếu vẫn nhớ mục tiêu, kiểm tra xem nó có đang trong tầm để tấn công không.
+                    if (player.squaredBoxedDistanceTo(sticky) <= range.pow(2) && targetTracker.validate(sticky)) {
+                        // Nếu có, khóa nó làm mục tiêu duy nhất cho tick này.
+                        targetTracker.target = sticky
+                        processTarget(sticky, range, situation)
+                        return // Thoát khỏi hàm để không tìm mục tiêu khác.
+                    } else {
+                        // Nếu vẫn nhớ nhưng ngoài tầm, không tấn công ai cả và chờ nó quay lại.
+                        targetTracker.target = null
+                        return // Thoát khỏi hàm để không tìm và đánh người khác.
+                    }
+                }
             }
         }
+        // ===== KẾT THÚC LOGIC MỚI =====
         
+        // Logic tìm mục tiêu thông thường sẽ chạy nếu 'samePlayer' bị tắt, hoặc chưa có mục tiêu nào được ghim.
         val maximumRange = if (targetTracker.closestSquaredEnemyDistance > range.pow(2)) {
             range + currentScanExtraRange
         } else {
