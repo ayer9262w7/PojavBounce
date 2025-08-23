@@ -531,7 +531,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         return x * x * (3.0f - 2.0f * x)
     }
 
-    // SỬA LỖI: Thêm hàm mới để thay thế .random()
     private fun generateRandomScanRange(): Float {
         val range = scanExtraRange
         if (range.endInclusive <= range.start) return range.start
