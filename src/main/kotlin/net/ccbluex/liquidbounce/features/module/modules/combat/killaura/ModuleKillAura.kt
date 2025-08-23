@@ -430,7 +430,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                 finalRotation = Rotation(currentYaw, currentPitch)
             }
             KillAuraRotationsConfigurable.AimingMode.MINARAI -> {
-                val randomFactor = (random() * 0.2f - 0.1f)
+                val randomFactor = (Random.nextFloat() * 0.2f - 0.1f)
                 currentYaw = interpolateAngle(currentYaw, idealTargetRotation.yaw, rotations.smoothSpeed * 0.8f + randomFactor)
                 currentPitch = interpolateAngle(currentPitch, idealTargetRotation.pitch, rotations.smoothSpeed * 0.8f + randomFactor)
                 finalRotation = Rotation(currentYaw, currentPitch)
@@ -534,7 +534,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     private fun generateRandomScanRange(): Float {
         val range = scanExtraRange
         if (range.endInclusive <= range.start) return range.start
-        return range.start + (range.endInclusive - range.start) * Random.nextFloat()
+        return Random.nextFloat() * (range.endInclusive - range.start) + range.start
     }
 
     enum class RaycastMode(override val choiceName: String) : NamedChoice {
