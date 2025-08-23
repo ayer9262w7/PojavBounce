@@ -86,8 +86,8 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     }
 
     val samePlayer by boolean("SamePlayer", false)
-    // === SỬA LẠI CÚ PHÁP CỦA DÒNG NÀY ===
-    private val samePlayerDuration by int("SamePlayerDuration", 5, 1..120, "s").displayable { samePlayer }
+    // === SỬA LẠI DÒNG NÀY ĐỂ XÓA `.displayable` ===
+    private val samePlayerDuration by int("SamePlayerDuration", 5, 1..120, "s")
 
     private val scanExtraRange by floatRange("ScanExtraRange", 2.0f..3.0f, 0.0f..7.0f).onChanged { range ->
         currentScanExtraRange = range.random()
