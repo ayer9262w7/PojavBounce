@@ -69,6 +69,8 @@ import net.minecraft.client.gui.screen.ingame.GenericContainerScreen
 import net.minecraft.client.util.math.MatrixStack
 import net.minecraft.entity.Entity
 import net.minecraft.entity.LivingEntity
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.pow
 
 @Suppress("MagicNumber")
@@ -87,6 +89,13 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
     val samePlayer by boolean("SamePlayer", false)
     private val samePlayerDuration by int("SamePlayerDuration", 5, 1..120, "s")
+
+    // ===== CÁC SETTING MỚI CHO ACCELERATION =====
+    private val yawAcceleration by float("YawAcceleration", 0.18f, 0.1f..0.5f)
+    private val pitchAcceleration by float("PitchAcceleration", 0.25f, 0.1f..0.5f)
+    private val dampingFactor by float("DampingFactor", 0.75f, 0.5f..0.95f)
+    private val maxVelocity by float("MaxVelocity", 25.0f, 10.0f..40.0f)
+    // ===============================================
 
     private val scanExtraRange by floatRange("ScanExtraRange", 2.0f..3.0f, 0.0f..7.0f).onChanged { range ->
         currentScanExtraRange = range.random()
@@ -107,6 +116,13 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     internal val ignoreOpenInventory by boolean("IgnoreOpenInventory", true)
     internal val simulateInventoryClosing by boolean("SimulateInventoryClosing", true)
 
+    // ===== BIẾN TRẠNG THÁI MỚI CHO ACCELERATION =====
+    private var currentYaw: Float = 0.0f
+    private var yawVelocity: Float = 0.0f
+    private var currentPitch: Float = 0.0f
+    private var pitchVelocity: Float = 0.0f
+    // =============================================
+
     init {
         tree(KillAuraAutoBlock)
     }
@@ -118,12 +134,24 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         tree(KillAuraFightBot)
     }
 
+    override fun enable() {
+        // Khởi tạo góc quay hiện tại để tránh bị giật khi bật module
+        if (mc.player != null) {
+            currentYaw = mc.player!!.yaw
+            currentPitch = mc.player!!.pitch
+        }
+        yawVelocity = 0.0f
+        pitchVelocity = 0.0f
+    }
+
     override fun disable() {
         targetTracker.reset()
         failedHits.clear()
         KillAuraAutoBlock.stopBlocking()
         KillAuraNotifyWhenFail.failedHitsIncrement = 0
         targetTracker.stickyTarget = null
+        yawVelocity = 0.0f
+        pitchVelocity = 0.0f
     }
 
     @Suppress("unused")
@@ -189,19 +217,13 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         if (!requirementsMet) {
             return@tickHandler
         }
+        
+        // Logic rotation cũ sẽ bị ghi đè bởi logic gia tốc trong processTarget
+        val rotation = RotationManager.currentRotation ?: player.rotation
 
-        val rotation = (if (rotations.rotationTiming == ON_TICK) {
-            getSpot(target, range.toDouble(), PointTracker.AimSituation.FOR_NOW)?.rotation
-        } else {
-            null
-        } ?: RotationManager.currentRotation ?: player.rotation).normalize()
-
-        // ===== BẮT ĐẦU ĐOẠN CODE CẢI TIẾN =====
         val finalTarget = if (samePlayer && targetTracker.stickyTarget != null) {
-            // Nếu SamePlayer đang bật và có mục tiêu ghim, luôn dùng mục tiêu đó làm mục tiêu cuối cùng.
             targetTracker.stickyTarget
         } else {
-            // Nếu không, mới thực hiện logic raycast và tìm mục tiêu dưới con trỏ chuột như cũ.
             val crosshairTarget = when {
                 raycast != TRACE_NONE -> {
                     raytraceEntity(range.toDouble(), rotation, filter = {
@@ -219,14 +241,12 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                 targetTracker.target = crosshairTarget
             }
             
-            crosshairTarget // Mục tiêu cuối cùng trong trường hợp này là kết quả của raycast.
+            crosshairTarget
         }
 
-        // Chỉ thực hiện tấn công nếu có một mục tiêu hợp lệ cuối cùng.
         if (finalTarget != null) {
             attackTarget(this, finalTarget, rotation)
         }
-        // ===== KẾT THÚC ĐOẠN CODE CẢI TIẾN =====
     }
 
     val shouldBlockSprinting
@@ -366,36 +386,42 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
     }
 
+    // ===== HÀM PROCESS TARGET ĐÃ ĐƯỢC VIẾT LẠI HOÀN TOÀN =====
     @Suppress("ReturnCount")
     private fun processTarget(
         entity: LivingEntity,
         maximumRange: Float,
         situation: PointTracker.AimSituation
     ): Boolean {
-        val (rotation, _) = getSpot(entity, maximumRange.toDouble(), situation) ?: return false
-        val ticks = rotations.calculateTicks(rotation)
-        ModuleDebug.debugParameter(ModuleKillAura, "Rotation Ticks", ticks)
+        // 1. Lấy góc quay lý tưởng đến mục tiêu
+        val (idealTargetRotation, _) = getSpot(entity, maximumRange.toDouble(), situation) ?: return false
 
-        when (rotations.rotationTiming) {
-            SNAP -> if (!clickScheduler.willClickAt(ticks.coerceAtLeast(1))) {
-                return true
-            }
-            ON_TICK -> if (ticks <= 1) {
-                return true
-            }
-            else -> {
-            }
-        }
+        // 2. Tính toán "lực" gia tốc dựa trên chênh lệch góc quay (có xử lý vòng tròn)
+        val yawDifference = normalizeAngleDifference(idealTargetRotation.yaw - currentYaw)
+        val pitchDifference = idealTargetRotation.pitch - currentPitch // Pitch không cần xử lý vòng tròn
 
-        RotationManager.setRotationTarget(
-            rotations.toRotationTarget(
-                rotation,
-                entity,
-                considerInventory = !ignoreOpenInventory
-            ),
-            priority = Priority.IMPORTANT_FOR_USAGE_2,
-            provider = this@ModuleKillAura
-        )
+        val yawForce = yawDifference * yawAcceleration
+        val pitchForce = pitchDifference * pitchAcceleration
+
+        // 3. Cập nhật vận tốc dựa trên lực
+        yawVelocity += yawForce
+        pitchVelocity += pitchForce
+
+        // 4. Giới hạn vận tốc tối đa (Velocity Cap)
+        yawVelocity = clamp(yawVelocity, -maxVelocity, maxVelocity)
+        pitchVelocity = clamp(pitchVelocity, -maxVelocity, maxVelocity)
+
+        // 5. Áp dụng lực cản/ma sát (Damping)
+        yawVelocity *= dampingFactor
+        pitchVelocity *= dampingFactor
+
+        // 6. Cập nhật góc quay hiện tại dựa trên vận tốc
+        currentYaw += yawVelocity
+        currentPitch = clamp(currentPitch + pitchVelocity, -90.0f, 90.0f) // Giới hạn pitch trong khoảng -90/90
+
+        // 7. Đặt góc quay cuối cùng cho game
+        val finalRotation = Rotation(currentYaw, currentPitch)
+        RotationManager.setRotationTarget(finalRotation, priority = Priority.IMPORTANT_FOR_USAGE_2, provider = this)
 
         return true
     }
@@ -453,12 +479,4 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         val criticalHit = target == null || player.isGliding || criticalsSelectionMode.isCriticalHit(target)
         val isInInventoryScreen = isInventoryOpen || isInContainerScreen
 
-        return criticalHit && !(isInInventoryScreen && !ignoreOpenInventory && !simulateInventoryClosing)
-    }
-
-    enum class RaycastMode(override val choiceName: String) : NamedChoice {
-        TRACE_NONE("None"),
-        TRACE_ONLYENEMY("Enemy"),
-        TRACE_ALL("All")
-    }
-}
+        return criticalHit && !(isInInventoryScreen && !ignoreOpenInventory && !simulateIn
