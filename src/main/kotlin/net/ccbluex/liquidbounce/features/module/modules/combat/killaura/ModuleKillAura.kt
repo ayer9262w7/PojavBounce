@@ -346,6 +346,8 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                         return
                     } else {
                         targetTracker.target = null
+                        // Khi mục tiêu ngoài tầm, vẫn tiếp tục cập nhật góc quay về phía nó
+                        processTarget(sticky, range, situation)
                         return
                     }
                 }
@@ -421,7 +423,12 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
         // 7. Đặt góc quay cuối cùng cho game
         val finalRotation = Rotation(currentYaw, currentPitch)
-        RotationManager.setRotationTarget(finalRotation, priority = Priority.IMPORTANT_FOR_USAGE_2, provider = this)
+        // SỬA LỖI: Chuyển đổi Rotation thành RotationTarget trước khi đặt
+        RotationManager.setRotationTarget(
+            rotations.toRotationTarget(finalRotation, entity, considerInventory = !ignoreOpenInventory),
+            priority = Priority.IMPORTANT_FOR_USAGE_2,
+            provider = this
+        )
 
         return true
     }
@@ -479,4 +486,30 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         val criticalHit = target == null || player.isGliding || criticalsSelectionMode.isCriticalHit(target)
         val isInInventoryScreen = isInventoryOpen || isInContainerScreen
 
-        return criticalHit && !(isInInventoryScreen && !ignoreOpenInventory && !simulateIn
+        return criticalHit && !(isInInventoryScreen && !ignoreOpenInventory && !simulateInventoryClosing)
+    }
+
+    // ===== CÁC HÀM HỖ TRỢ MỚI CHO ACCELERATION =====
+    private fun normalizeAngleDifference(diff: Float): Float {
+        var newDiff = diff % 360.0f
+        if (newDiff >= 180.0f) {
+            newDiff -= 360.0f
+        }
+        if (newDiff < -180.0f) {
+            newDiff += 360.0f
+        }
+        return newDiff
+    }
+
+    private fun clamp(value: Float, min: Float, max: Float): Float {
+        return max(min, min(value, max))
+    }
+    // ===============================================
+
+    // ===== SỬA LỖI: Thêm lại enum class RaycastMode đã bị thiếu =====
+    enum class RaycastMode(override val choiceName: String) : NamedChoice {
+        TRACE_NONE("None"),
+        TRACE_ONLYENEMY("Enemy"),
+        TRACE_ALL("All")
+    }
+}
