@@ -86,8 +86,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     }
 
     val samePlayer by boolean("SamePlayer", false)
-    // === DÒNG GÂY LỖI ĐÃ ĐƯỢC SỬA LẠI ===
-    // Bằng cách xóa bỏ phần logic ẩn/hiện, thanh trượt sẽ luôn hiển thị và không gây lỗi.
     private val samePlayerDuration by int("SamePlayerDuration", 5, 1..120, "s")
 
     private val scanExtraRange by floatRange("ScanExtraRange", 2.0f..3.0f, 0.0f..7.0f).onChanged { range ->
@@ -198,24 +196,37 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             null
         } ?: RotationManager.currentRotation ?: player.rotation).normalize()
 
-        val crosshairTarget = when {
-            raycast != TRACE_NONE -> {
-                raytraceEntity(range.toDouble(), rotation, filter = {
-                    when (raycast) {
-                        TRACE_ONLYENEMY -> it.shouldBeAttacked()
-                        TRACE_ALL -> true
-                        else -> false
-                    }
-                })?.entity ?: target
+        // ===== BẮT ĐẦU ĐOẠN CODE CẢI TIẾN =====
+        val finalTarget = if (samePlayer && targetTracker.stickyTarget != null) {
+            // Nếu SamePlayer đang bật và có mục tiêu ghim, luôn dùng mục tiêu đó làm mục tiêu cuối cùng.
+            targetTracker.stickyTarget
+        } else {
+            // Nếu không, mới thực hiện logic raycast và tìm mục tiêu dưới con trỏ chuột như cũ.
+            val crosshairTarget = when {
+                raycast != TRACE_NONE -> {
+                    raytraceEntity(range.toDouble(), rotation, filter = {
+                        when (raycast) {
+                            TRACE_ONLYENEMY -> it.shouldBeAttacked()
+                            TRACE_ALL -> true
+                            else -> false
+                        }
+                    })?.entity ?: target
+                }
+                else -> target
             }
-            else -> target
+
+            if (crosshairTarget is LivingEntity && crosshairTarget.shouldBeAttacked() && crosshairTarget != target) {
+                targetTracker.target = crosshairTarget
+            }
+            
+            crosshairTarget // Mục tiêu cuối cùng trong trường hợp này là kết quả của raycast.
         }
 
-        if (crosshairTarget is LivingEntity && crosshairTarget.shouldBeAttacked() && crosshairTarget != target && (targetTracker.stickyTarget == null || !samePlayer)) {
-            targetTracker.target = crosshairTarget
+        // Chỉ thực hiện tấn công nếu có một mục tiêu hợp lệ cuối cùng.
+        if (finalTarget != null) {
+            attackTarget(this, finalTarget, rotation)
         }
-
-        attackTarget(this, crosshairTarget, rotation)
+        // ===== KẾT THÚC ĐOẠN CODE CẢI TIẾN =====
     }
 
     val shouldBlockSprinting
