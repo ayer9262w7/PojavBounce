@@ -211,7 +211,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             else -> target
         }
 
-        if (crosshairTarget is LivingEntity && crosshairTarget.shouldBeAttacked() && crosshairTarget != target) {
+        if (crosshairTarget is LivingEntity && crosshairTarget.shouldBeAttacked() && crosshairTarget != target && (targetTracker.stickyTarget == null || !samePlayer)) {
             targetTracker.target = crosshairTarget
         }
 
