@@ -24,13 +24,16 @@ import net.ccbluex.liquidbounce.utils.client.player
 import net.ccbluex.liquidbounce.utils.client.world
 import net.ccbluex.liquidbounce.utils.combat.TargetTracker
 import net.ccbluex.liquidbounce.utils.entity.wouldBlockHit
+import net.ccbluex.liquidbounce.utils.timer.MSTimer
 import net.minecraft.entity.LivingEntity
 import net.minecraft.entity.player.PlayerEntity
 import net.minecraft.item.AxeItem
 
 object KillAuraTargetTracker : TargetTracker() {
 
-    internal var stickyTarget: LivingEntity? = null // <-- THÊM DÒNG NÀY
+    internal var stickyTarget: LivingEntity? = null
+    // === THÊM ĐỒNG HỒ BẤM GIỜ ===
+    internal val stickyTimer = MSTimer()
 
     /**
      * Allows to ignore when the target is holding a shield,

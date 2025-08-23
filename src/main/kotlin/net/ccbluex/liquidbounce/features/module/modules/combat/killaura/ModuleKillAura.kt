@@ -92,8 +92,9 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
     }
 
-    // === CÀI ĐẶT MỚI ===
+    // === CÁC CÀI ĐẶT MỚI ===
     val samePlayer by boolean("SamePlayer", false)
+    private val samePlayerDuration by int("SamePlayerDuration", 5, 1..120, "s") { samePlayer }
 
     private val scanExtraRange by floatRange("ScanExtraRange", 2.0f..3.0f, 0.0f..7.0f).onChanged { range ->
         currentScanExtraRange = range.random()
@@ -139,7 +140,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         failedHits.clear()
         KillAuraAutoBlock.stopBlocking()
         KillAuraNotifyWhenFail.failedHitsIncrement = 0
-        // === DÒNG MỚI ===
         targetTracker.stickyTarget = null
     }
 
@@ -164,24 +164,18 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
     @Suppress("unused")
     private val rotationUpdateHandler = handler<RotationUpdateEvent> {
-        // Make sure killaura-logic is not running while inventory is open
         val isInInventoryScreen =
             InventoryManager.isInventoryOpen || mc.currentScreen is GenericContainerScreen
 
         val shouldResetTarget = player.isSpectator || player.isDead || !requirementsMet
 
         if (isInInventoryScreen && !ignoreOpenInventory || shouldResetTarget) {
-            // Reset current target
             targetTracker.reset()
-            // === DÒNG MỚI ===
             targetTracker.stickyTarget = null
             return@handler
         }
 
-        // Update current target tracker to make sure you attack the best enemy
         updateTarget()
-
-        // Update Auto Weapon
         ModuleAutoWeapon.prepare(targetTracker.target)
     }
 
@@ -191,7 +185,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             return@tickHandler
         }
 
-        // Check if there is target to attack
         val target = targetTracker.target
 
         if (CombatManager.shouldPauseCombat) {
@@ -202,7 +195,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         if (target == null) {
             val hasUnblocked = KillAuraAutoBlock.stopBlocking()
 
-            // Deal with fake swing when there is no target
             if (KillAuraFailSwing.enabled && requirementsMet) {
                 if (hasUnblocked) {
                     waitTicks(KillAuraAutoBlock.currentTickOff)
@@ -212,7 +204,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             return@tickHandler
         }
 
-        // Check if the module should (not) continue after the blocking state is updated
         if (!requirementsMet) {
             return@tickHandler
         }
@@ -257,10 +248,8 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
     @Suppress("CognitiveComplexMethod", "CyclomaticComplexMethod")
     private suspend fun attackTarget(sequence: Sequence, target: Entity, rotation: Rotation) {
-        // Make it seem like we are blocking
         KillAuraAutoBlock.makeSeemBlock()
 
-        // Are we actually facing the [chosenEntity]
         val isFacingEnemy = facingEnemy(toEntity = target, rotation = rotation,
             range = range.toDouble(),
             wallsRange = wallRange.toDouble()) || ModuleElytraTarget.canIgnoreKillAuraRotations
@@ -269,7 +258,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         ModuleDebug.debugParameter(ModuleKillAura, "Rotation", rotation)
         ModuleDebug.debugParameter(ModuleKillAura, "Target", target.nameForScoreboard)
 
-        // Check if our target is in range, otherwise deal with auto block
         if (!isFacingEnemy) {
             if (KillAuraAutoBlock.enabled && KillAuraAutoBlock.onScanRange &&
                 player.squaredBoxedDistanceTo(target) <= (range + currentScanExtraRange).pow(2)) {
@@ -277,10 +265,8 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                 return
             }
 
-            // Make sure we are not blocking
             val hasUnblocked = KillAuraAutoBlock.stopBlocking()
 
-            // Deal with fake swing
             if (KillAuraFailSwing.enabled) {
                 if (hasUnblocked) {
                     sequence.waitTicks(KillAuraAutoBlock.currentTickOff)
@@ -293,20 +279,18 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
         ModuleDebug.debugParameter(ModuleKillAura, "Valid Rotation", rotation)
 
-        // Attack enemy, according to the attack scheduler
         if (clickScheduler.isClickTick && validateAttack(target)) {
             clickScheduler.attack(sequence, rotation) {
-                // On each click, we check if we are still ready to attack
                 if (!validateAttack(target)) {
                     return@attack false
                 }
 
-                // Attack enemy
                 target.attack(true, keepSprint && !shouldBlockSprinting)
 
-                // === LOGIC MỚI: NHỚ MỤC TIÊU SAU KHI TẤN CÔNG ===
+                // === CẬP NHẬT LOGIC ĐẶT LẠI ĐỒNG HỒ ===
                 if (samePlayer && target is LivingEntity) {
                     targetTracker.stickyTarget = target
+                    targetTracker.stickyTimer.reset() // Đặt lại đồng hồ mỗi khi tấn công
                 }
 
                 currentScanExtraRange = scanExtraRange.random()
@@ -328,7 +312,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     }
 
     private fun updateTarget() {
-        // Determine aim situation based on click scheduler
         val situation = when {
             clickScheduler.isClickTick || clickScheduler.willClickAt(1)
                 -> PointTracker.AimSituation.FOR_NEXT_TICK
@@ -336,20 +319,20 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
         ModuleDebug.debugParameter(ModuleKillAura, "AimSituation", situation)
 
-        // === LOGIC MỚI: ƯU TIÊN MỤC TIÊU ĐÃ KHÓA ===
+        // === CẬP NHẬT LOGIC KIỂM TRA THỜI GIAN ===
         if (samePlayer) {
             val sticky = targetTracker.stickyTarget
-            // Check if the locked target is still valid
-            if (sticky != null && sticky.isAlive && player.squaredBoxedDistanceTo(sticky) <= range.pow(2) && targetTracker.validate(sticky)) {
-                targetTracker.target = sticky // Set current target to the locked target
-                processTarget(sticky, range, situation) // Process rotations etc.
-                return // Skip searching for a new target
+            // Kiểm tra xem mục tiêu có còn hợp lệ và thời gian ghim chưa hết
+            val timePassed = targetTracker.stickyTimer.hasTimePassed((samePlayerDuration * 1000).toLong())
+            if (sticky != null && !timePassed && sticky.isAlive && player.squaredBoxedDistanceTo(sticky) <= range.pow(2) && targetTracker.validate(sticky)) {
+                targetTracker.target = sticky
+                processTarget(sticky, range, situation)
+                return
             } else {
-                targetTracker.stickyTarget = null // Clear locked target if it's no longer valid
+                targetTracker.stickyTarget = null // Xóa mục tiêu nếu không còn hợp lệ hoặc hết thời gian
             }
         }
         
-        // Calculate maximum range based on enemy distance
         val maximumRange = if (targetTracker.closestSquaredEnemyDistance > range.pow(2)) {
             range + currentScanExtraRange
         } else {
@@ -361,7 +344,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         val squaredMaxRange = maximumRange.pow(2)
         val squaredNormalRange = range.pow(2)
 
-        // Find suitable target
         val target = targetTracker.targets()
             .filter { entity -> entity.squaredBoxedDistanceTo(player) <= squaredMaxRange }
             .sortedBy { entity -> if (entity.squaredBoxedDistanceTo(player) <= squaredNormalRange) 0 else 1 }
@@ -396,22 +378,13 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         ModuleDebug.debugParameter(ModuleKillAura, "Rotation Ticks", ticks)
 
         when (rotations.rotationTiming) {
-
-            // If our click scheduler is not going to click the moment we reach the target,
-            // we should not start aiming towards the target just yet.
             SNAP -> if (!clickScheduler.willClickAt(ticks.coerceAtLeast(1))) {
                 return true
             }
-
-            // [ON_TICK] will always instantly aim onto the target on attack, however, if
-            // our rotation is unable to be ready in time, we can at least start aiming towards
-            // the target.
             ON_TICK -> if (ticks <= 1) {
                 return true
             }
-
             else -> {
-                // Continue with regular aiming
             }
         }
 
@@ -427,19 +400,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
         return true
     }
-
-    /**
-     * Get the best spot to attack the entity
-     *
-     * @param entity The entity to attack
-     * @param range The range to attack the entity (NOT SQUARED)
-     * @param situation The aim situation we are in
-     * - [PointTracker.AimSituation.FOR_NOW] if we are going to attack the entity on the current tick (ON_TICK)
-     * - [PointTracker.AimSituation.FOR_THE_FUTURE] if we are going to attack the entity in the future
-     * - [PointTracker.AimSituation.FOR_NEXT_TICK] if we are going to attack the entity on the next tick
-     *
-     * @return The best spot to attack the entity
-     */
+    
     private fun getSpot(entity: LivingEntity, range: Double,
                         situation: PointTracker.AimSituation): RotationWithVector? {
         val point = pointTracker.gatherPoint(
@@ -458,10 +419,8 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
         val rotationPreference = LeastDifferencePreference.leastDifferenceToLastPoint(eyes, nextPoint)
 
-        // find best spot
         val spot = raytraceBox(
             eyes, point.cutOffBox,
-            // Since [range] is squared, we need to square root
             range = range,
             wallsRange = wallRange.toDouble(),
             rotationPreference = rotationPreference
@@ -475,7 +434,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         return if (spot == null && rotations.aimThroughWalls) {
             val throughSpot = raytraceBox(
                 eyes, point.cutOffBox,
-                // Since [range] is squared, we need to square root
                 range = range,
                 wallsRange = range,
                 rotationPreference = rotationPreference
@@ -492,9 +450,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
     }
 
-    /**
-     * Check if we can attack the target at the current moment
-     */
     internal fun validateAttack(target: Entity? = null): Boolean {
         val criticalHit = target == null || player.isGliding || criticalsSelectionMode.isCriticalHit(target)
         val isInInventoryScreen = isInventoryOpen || isInContainerScreen
