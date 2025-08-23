@@ -69,6 +69,7 @@ import net.minecraft.client.gui.screen.ingame.GenericContainerScreen
 import net.minecraft.client.util.math.MatrixStack
 import net.minecraft.entity.Entity
 import net.minecraft.entity.LivingEntity
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -382,60 +383,67 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         maximumRange: Float,
         situation: PointTracker.AimSituation
     ): Boolean {
-        if (rotations.angleSmoothMode == KillAuraRotationsConfigurable.AngleSmoothMode.ACCELERATION) {
-            val (idealTargetRotation, _) = getSpot(entity, maximumRange.toDouble(), situation) ?: return false
+        val (idealTargetRotation, _) = getSpot(entity, maximumRange.toDouble(), situation) ?: return false
+        val finalRotation: Rotation
 
-            val yawDifference = normalizeAngleDifference(idealTargetRotation.yaw - currentYaw)
-            val pitchDifference = idealTargetRotation.pitch - currentPitch
+        // Cập nhật để sử dụng đường dẫn mới đến các setting
+        val accelSettings = KillAuraRotationsConfigurable.AccelerationSettings
+        
+        when (rotations.aimingMode) {
+            KillAuraRotationsConfigurable.AimingMode.ACCELERATION -> {
+                val yawDifference = normalizeAngleDifference(idealTargetRotation.yaw - currentYaw)
+                val pitchDifference = idealTargetRotation.pitch - currentPitch
 
-            val yawForce = yawDifference * rotations.yawAcceleration
-            val pitchForce = pitchDifference * rotations.pitchAcceleration
+                val yawForce = yawDifference * accelSettings.yawAcceleration
+                val pitchForce = pitchDifference * accelSettings.pitchAcceleration
 
-            yawVelocity += yawForce
-            pitchVelocity += pitchForce
+                yawVelocity += yawForce
+                pitchVelocity += pitchForce
 
-            yawVelocity = clamp(yawVelocity, -rotations.maxVelocity, rotations.maxVelocity)
-            pitchVelocity = clamp(pitchVelocity, -rotations.maxVelocity, rotations.maxVelocity)
+                yawVelocity = clamp(yawVelocity, -accelSettings.maxVelocity, accelSettings.maxVelocity)
+                pitchVelocity = clamp(pitchVelocity, -accelSettings.maxVelocity, accelSettings.maxVelocity)
 
-            yawVelocity *= rotations.dampingFactor
-            pitchVelocity *= rotations.dampingFactor
+                yawVelocity *= accelSettings.dampingFactor
+                pitchVelocity *= accelSettings.dampingFactor
 
-            currentYaw += yawVelocity
-            currentPitch = clamp(currentPitch + pitchVelocity, -90.0f, 90.0f)
+                currentYaw += yawVelocity
+                currentPitch = clamp(currentPitch + pitchVelocity, -90.0f, 90.0f)
 
-            val finalRotation = Rotation(currentYaw, currentPitch)
-            RotationManager.setRotationTarget(
-                rotations.toRotationTarget(finalRotation, entity, considerInventory = !ignoreOpenInventory),
-                priority = Priority.IMPORTANT_FOR_USAGE_2,
-                provider = this
-            )
-            return true
-        } else {
-            val (rotation, _) = getSpot(entity, maximumRange.toDouble(), situation) ?: return false
-            val ticks = rotations.calculateTicks(rotation)
-            ModuleDebug.debugParameter(ModuleKillAura, "Rotation Ticks", ticks)
-
-            when (rotations.rotationTiming) {
-                SNAP -> if (!clickScheduler.willClickAt(ticks.coerceAtLeast(1))) {
-                    return true
-                }
-                ON_TICK -> if (ticks <= 1) {
-                    return true
-                }
-                else -> {}
+                finalRotation = Rotation(currentYaw, currentPitch)
             }
-
-            RotationManager.setRotationTarget(
-                rotations.toRotationTarget(
-                    rotation,
-                    entity,
-                    considerInventory = !ignoreOpenInventory
-                ),
-                priority = Priority.IMPORTANT_FOR_USAGE_2,
-                provider = this@ModuleKillAura
-            )
-            return true
+            KillAuraRotationsConfigurable.AimingMode.INTERPOLATION -> {
+                currentYaw = interpolateAngle(currentYaw, idealTargetRotation.yaw, rotations.smoothSpeed)
+                currentPitch = interpolateAngle(currentPitch, idealTargetRotation.pitch, rotations.smoothSpeed)
+                finalRotation = Rotation(currentYaw, currentPitch)
+            }
+            KillAuraRotationsConfigurable.AimingMode.LINEAR -> {
+                val speed = rotations.smoothSpeed * 20 
+                currentYaw = moveAngleTowards(currentYaw, idealTargetRotation.yaw, speed)
+                currentPitch = moveAngleTowards(currentPitch, idealTargetRotation.pitch, speed)
+                finalRotation = Rotation(currentYaw, currentPitch)
+            }
+            KillAuraRotationsConfigurable.AimingMode.SIGMOID -> {
+                val yawDiff = normalizeAngleDifference(idealTargetRotation.yaw - currentYaw)
+                val smoothFactor = smoothStep(abs(yawDiff) / 180f) * rotations.smoothSpeed
+                
+                currentYaw = interpolateAngle(currentYaw, idealTargetRotation.yaw, smoothFactor)
+                currentPitch = interpolateAngle(currentPitch, idealTargetRotation.pitch, smoothFactor)
+                finalRotation = Rotation(currentYaw, currentPitch)
+            }
+            KillAuraRotationsConfigurable.AimingMode.MINARAI -> {
+                val randomFactor = (random() * 0.2f - 0.1f)
+                currentYaw = interpolateAngle(currentYaw, idealTargetRotation.yaw, rotations.smoothSpeed * 0.8f + randomFactor)
+                currentPitch = interpolateAngle(currentPitch, idealTargetRotation.pitch, rotations.smoothSpeed * 0.8f + randomFactor)
+                finalRotation = Rotation(currentYaw, currentPitch)
+            }
         }
+
+        RotationManager.setRotationTarget(
+            rotations.toRotationTarget(finalRotation, entity, considerInventory = !ignoreOpenInventory),
+            priority = Priority.IMPORTANT_FOR_USAGE_2,
+            provider = this
+        )
+        return true
     }
     
     private fun getSpot(entity: LivingEntity, range: Double,
@@ -507,6 +515,21 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
     private fun clamp(value: Float, min: Float, max: Float): Float {
         return max(min, min(value, max))
+    }
+
+    private fun interpolateAngle(start: Float, end: Float, factor: Float): Float {
+        val diff = normalizeAngleDifference(end - start)
+        return start + diff * factor
+    }
+
+    private fun moveAngleTowards(current: Float, target: Float, speed: Float): Float {
+        val diff = normalizeAngleDifference(target - current)
+        val move = clamp(diff, -speed, speed)
+        return current + move
+    }
+
+    private fun smoothStep(x: Float): Float {
+        return x * x * (3.0f - 2.0f * x)
     }
 
     enum class RaycastMode(override val choiceName: String) : NamedChoice {

@@ -19,23 +19,34 @@
 package net.ccbluex.liquidbounce.features.module.modules.combat.killaura
 
 import net.ccbluex.liquidbounce.config.types.NamedChoice
+import net.ccbluex.liquidbounce.config.types.nesting.Configurable
 import net.ccbluex.liquidbounce.utils.aiming.RotationsConfigurable
 
 object KillAuraRotationsConfigurable : RotationsConfigurable(ModuleKillAura, combatSpecific = true) {
 
     val rotationTiming by enumChoice("RotationTiming", KillAuraRotationTiming.NORMAL)
     val aimThroughWalls by boolean("ThroughWalls", false)
+    val aimingMode by enumChoice("AimingMode", AimingMode.ACCELERATION)
 
-    // ===== CÁC SETTING MỚI CHO ANGLESmooth =====
-    val angleSmoothMode by enumChoice("AngleSmoothMode", AngleSmoothMode.ACCELERATION)
+    // Nhóm các setting của Acceleration vào một Configurable riêng
+    object AccelerationSettings : Configurable("Acceleration Settings") {
+        // Các setting này giờ là "con" của Acceleration Settings
+        val yawAcceleration by float("YawAcceleration", 0.18f, 0.1f..1.5f)
+        val pitchAcceleration by float("PitchAcceleration", 0.25f, 0.1f..1.5f)
+        val dampingFactor by float("DampingFactor", 0.75f, 0.01f..1.0f)
+        val maxVelocity by float("MaxVelocity", 25.0f, 1.0f..100.0f)
+    }
 
-    // SỬA LỖI: Xóa bỏ .displayable để đảm bảo biên dịch thành công.
-    // Các setting này sẽ luôn hiển thị, nhưng chỉ có tác dụng khi AngleSmoothMode là Acceleration.
-    val yawAcceleration by float("YawAcceleration", 0.18f, 0.1f..1.5f)
-    val pitchAcceleration by float("PitchAcceleration", 0.25f, 0.1f..1.5f)
-    val dampingFactor by float("DampingFactor", 0.75f, 0.1f..1.0f)
-    val maxVelocity by float("MaxVelocity", 25.0f, 1.0f..100f)
-    // ===========================================
+    // Khởi tạo nhóm setting và làm cho nó chỉ hiển thị khi cần
+    init {
+        tree(AccelerationSettings).displayable { aimingMode == AimingMode.ACCELERATION }
+    }
+
+    val smoothSpeed by float("SmoothSpeed", 0.15f, 0.05f..0.5f).displayable {
+        aimingMode == AimingMode.LINEAR ||
+        aimingMode == AimingMode.INTERPOLATION ||
+        aimingMode == AimingMode.SIGMOID
+    }
 
     enum class KillAuraRotationTiming(override val choiceName: String) : NamedChoice {
         NORMAL("Normal"),
@@ -43,8 +54,7 @@ object KillAuraRotationsConfigurable : RotationsConfigurable(ModuleKillAura, com
         ON_TICK("OnTick")
     }
 
-    // Enum cho các chế độ AngleSmooth
-    enum class AngleSmoothMode(override val choiceName: String) : NamedChoice {
+    enum class AimingMode(override val choiceName: String) : NamedChoice {
         LINEAR("Linear"),
         SIGMOID("Sigmoid"),
         INTERPOLATION("Interpolation"),
@@ -52,4 +62,3 @@ object KillAuraRotationsConfigurable : RotationsConfigurable(ModuleKillAura, com
         MINARAI("Minarai")
     }
 }
-
