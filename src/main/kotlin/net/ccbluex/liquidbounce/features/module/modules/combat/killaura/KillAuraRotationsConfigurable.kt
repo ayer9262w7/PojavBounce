@@ -19,29 +19,12 @@
 package net.ccbluex.liquidbounce.features.module.modules.combat.killaura
 
 import net.ccbluex.liquidbounce.config.types.NamedChoice
-import net.ccbluex.liquidbounce.config.types.nesting.Configurable
 import net.ccbluex.liquidbounce.utils.aiming.RotationsConfigurable
 
 object KillAuraRotationsConfigurable : RotationsConfigurable(ModuleKillAura, combatSpecific = true) {
 
     val rotationTiming by enumChoice("RotationTiming", KillAuraRotationTiming.NORMAL)
     val aimThroughWalls by boolean("ThroughWalls", false)
-    val aimingMode by enumChoice("AimingMode", AimingMode.ACCELERATION)
-
-    // Nhóm các setting của Acceleration vào một Configurable riêng
-    object AccelerationSettings : Configurable("Acceleration Settings") {
-        val yawAcceleration by float("YawAcceleration", 0.18f, 0.1f..2.0f)
-        val pitchAcceleration by float("PitchAcceleration", 0.25f, 0.1f..2.0f)
-        val dampingFactor by float("DampingFactor", 0.75f, 0.1f..1.0f)
-        val maxVelocity by float("MaxVelocity", 25.0f, 1.0f..100.0f)
-    }
-
-    // Khởi tạo nhóm setting
-    init {
-        tree(AccelerationSettings)
-    }
-
-    val smoothSpeed by float("SmoothSpeed", 0.15f, 0.05f..0.5f)
 
     enum class KillAuraRotationTiming(override val choiceName: String) : NamedChoice {
         NORMAL("Normal"),
@@ -49,11 +32,4 @@ object KillAuraRotationsConfigurable : RotationsConfigurable(ModuleKillAura, com
         ON_TICK("OnTick")
     }
 
-    enum class AimingMode(override val choiceName: String) : NamedChoice {
-        LINEAR("Linear"),
-        SIGMOID("Sigmoid"),
-        INTERPOLATION("Interpolation"),
-        ACCELERATION("Acceleration"),
-        MINARAI("Minarai")
-    }
 }
