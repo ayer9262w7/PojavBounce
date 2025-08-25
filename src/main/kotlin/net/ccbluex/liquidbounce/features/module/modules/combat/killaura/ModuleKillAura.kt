@@ -49,6 +49,7 @@ import net.ccbluex.liquidbounce.render.renderEnvironmentForWorld
 import net.ccbluex.liquidbounce.utils.aiming.RotationManager
 import net.ccbluex.liquidbounce.utils.aiming.data.Rotation
 import net.ccbluex.liquidbounce.utils.aiming.data.RotationWithVector
+import net.ccbluex.liquidbounce.utils.aiming.data.normalized
 import net.ccbluex.liquidbounce.utils.aiming.point.PointTracker
 import net.ccbluex.liquidbounce.utils.aiming.preference.LeastDifferencePreference
 import net.ccbluex.liquidbounce.utils.aiming.utils.facingEnemy
@@ -194,7 +195,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             getSpot(target, range.toDouble(), PointTracker.AimSituation.FOR_NOW)?.rotation
         } else {
             null
-        } ?: RotationManager.currentRotation ?: player.rotation).normalize()
+        } ?: RotationManager.currentRotation ?: player.rotation).normalized()
 
         // ===== BẮT ĐẦU ĐOẠN CODE CẢI TIẾN =====
         val finalTarget = if (samePlayer && targetTracker.stickyTarget != null) {
@@ -355,7 +356,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
             RotationManager.setRotationTarget(
                 rotations.toRotationTarget(
-                    KillAuraFightBot.getMovementRotation(),
+                    KillAuraFightBot.getMovementRotation().normalized(),
                     considerInventory = !ignoreOpenInventory
                 ),
                 priority = Priority.IMPORTANT_FOR_USAGE_2,
@@ -373,7 +374,8 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         situation: PointTracker.AimSituation
     ): Boolean {
         val (rotation, _) = getSpot(entity, maximumRange.toDouble(), situation) ?: return false
-        val ticks = rotations.calculateTicks(rotation)
+        val normalizedRotation = rotation.normalized() // Chuẩn hóa rotation
+        val ticks = rotations.calculateTicks(normalizedRotation)
         ModuleDebug.debugParameter(ModuleKillAura, "Rotation Ticks", ticks)
 
         when (rotations.rotationTiming) {
@@ -389,7 +391,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
         RotationManager.setRotationTarget(
             rotations.toRotationTarget(
-                rotation,
+                normalizedRotation,
                 entity,
                 considerInventory = !ignoreOpenInventory
             ),
@@ -416,7 +418,12 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             ModuleDebug.DebuggedBox(point.cutOffBox, Color4b.GREEN.with(a = 90)))
         ModuleDebug.debugGeometry(this, "Point", ModuleDebug.DebuggedPoint(nextPoint, Color4b.WHITE))
 
-        val rotationPreference = LeastDifferencePreference.leastDifferenceToLastPoint(eyes, nextPoint)
+        // Get current rotation and calculate target rotation
+        val currentRotation = (RotationManager.currentRotation ?: player.rotation).normalized()
+        var rotationPreference = LeastDifferencePreference.leastDifferenceToLastPoint(eyes, nextPoint).normalized()
+        
+        // Prevent oscillation by limiting rotation difference
+        rotationPreference = currentRotation.avoidOscillation(rotationPreference, 170f)
 
         val spot = raytraceBox(
             eyes, point.cutOffBox,
