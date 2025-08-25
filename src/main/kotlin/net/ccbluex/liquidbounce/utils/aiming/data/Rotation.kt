@@ -87,12 +87,67 @@ data class Rotation(
     }
 
     /**
+     * Normalizes the rotation to prevent 360° wrap-around issues
+     * This version maintains the existing GCD normalization but adds additional checks
+     */
+    fun normalized(): Rotation {
+        val normalized = this.normalize()
+        
+        // Additional normalization to prevent oscillation
+        var yaw = normalized.yaw
+        val pitch = normalized.pitch
+        
+        // Ensure yaw is within -180 to 180 range to prevent oscillation
+        if (yaw < -180) yaw += 360
+        if (yaw > 180) yaw -= 360
+        
+        return Rotation(yaw, pitch, true)
+    }
+
+    /**
      * Calculates the angle between this and the other rotation.
      *
      * @return angle in degrees
      */
     fun angleTo(other: Rotation): Float {
         return rotationDeltaTo(other).length().coerceAtMost(180.0F)
+    }
+
+    /**
+     * Calculates the shortest angle difference between two rotations
+     * Handles 360° wrap-around correctly to prevent oscillation
+     */
+    fun safeAngleTo(other: Rotation): Float {
+        val thisNormalized = this.normalized()
+        val otherNormalized = other.normalized()
+        
+        val diffYaw = angleDifference(otherNormalized.yaw, thisNormalized.yaw)
+        val diffPitch = angleDifference(otherNormalized.pitch, thisNormalized.pitch)
+        
+        return kotlin.math.sqrt((diffYaw * diffYaw + diffPitch * diffPitch).toDouble()).toFloat()
+    }
+
+    /**
+     * Creates a rotation that avoids 180° flips by limiting maximum angle difference
+     */
+    fun avoidOscillation(target: Rotation, maxAngle: Float = 170f): Rotation {
+        val currentNormalized = this.normalized()
+        val targetNormalized = target.normalized()
+        
+        val yawDiff = angleDifference(targetNormalized.yaw, currentNormalized.yaw)
+        val pitchDiff = angleDifference(targetNormalized.pitch, currentNormalized.pitch)
+        
+        // If the difference is too large, limit it to prevent oscillation
+        return if (abs(yawDiff) > maxAngle) {
+            val limitedYaw = if (yawDiff > 0) {
+                currentNormalized.yaw + maxAngle
+            } else {
+                currentNormalized.yaw - maxAngle
+            }
+            Rotation(limitedYaw, targetNormalized.pitch).normalized()
+        } else {
+            targetNormalized
+        }
     }
 
     /**
@@ -128,5 +183,3 @@ data class Rotation(
     }
 
 }
-
-
