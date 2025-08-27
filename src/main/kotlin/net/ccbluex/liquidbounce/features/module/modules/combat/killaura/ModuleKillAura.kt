@@ -67,8 +67,8 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
     }
 
+    // --- THÊM CẤU HÌNH MỚI ---
     val predictionAggressiveness by float("PredictionAggressiveness", 1.0f, 0.0f..2.0f)
-
     val samePlayer by boolean("SamePlayer", false)
     private val samePlayerDuration by int("SamePlayerDuration", 5, 1..120, "s")
 
@@ -171,7 +171,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
 
         if (!requirementsMet) {
-            return@tick_handler@tickHandler // keep original behavior but avoid unreachable code (preserve)
+            return@tickHandler
         }
 
         MovementAnalyzer.recordEntityState(target)
@@ -227,17 +227,13 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     private suspend fun attackTarget(sequence: Sequence, target: Entity, rotation: Rotation) {
         KillAuraAutoBlock.makeSeemBlock()
 
+        // --- TÍNH TOÁN TẦM ĐÁNH HIỆU QUẢ VỚI DỰ ĐOÁN ---
         val actualReach = range.toDouble()
         val effectiveReach = calculateEffectiveReach(target)
 
-        // Use explicit named args and include fromEntity to select the correct overload.
-        val isFacingEnemy = facingEnemy(
-            fromEntity = player,
-            toEntity = target,
-            rotation = rotation,
-            range = effectiveReach,
-            wallsRange = wallRange.toDouble()
-        ) || ModuleElytraTarget.canIgnoreKillAuraRotations
+        // Gọi positional để đảm bảo đúng overload và tránh nhầm lẫn named-args giữa hai overloads
+        val isFacingEnemy = facingEnemy(player, target, rotation, effectiveReach, wallRange.toDouble())
+            || ModuleElytraTarget.canIgnoreKillAuraRotations
 
         ModuleDebug.debugParameter(ModuleKillAura, "Is Facing Enemy", isFacingEnemy)
         ModuleDebug.debugParameter(ModuleKillAura, "Rotation", rotation)
@@ -297,6 +293,9 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
     }
 
+    /**
+     * HÀM MỚI: Tính toán tầm đánh hiệu quả với dự đoán chuyển động
+     */
     private fun calculateEffectiveReach(target: Entity): Double {
         val pingMs = NetworkMonitor.getFinalPingDecision()
         val speed = MovementAnalyzer.getSpeedTowardsTarget(player, target)
@@ -318,188 +317,4 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
         val shouldUsePrediction = when {
             NetworkMonitor.getJitter() > 50.0 -> false
-            MovementAnalyzer.isMovementAnomalous(target) -> false
-            confidence < 0.3 && aggressionFactor < 1.5 -> false
-            else -> true
-        }
-
-        val actualReachVal = range.toDouble()
-        return if (shouldUsePrediction) {
-            actualReachVal + adjustedPredictedDistance
-        } else {
-            actualReachVal
-        }
-    }
-
-    private fun updateTarget() {
-        val situation = when {
-            clickScheduler.isClickTick || clickScheduler.willClickAt(1)
-                -> PointTracker.AimSituation.FOR_NEXT_TICK
-            else -> PointTracker.AimSituation.FOR_THE_FUTURE
-        }
-        ModuleDebug.debugParameter(ModuleKillAura, "AimSituation", situation)
-
-        if (samePlayer) {
-            val sticky = targetTracker.stickyTarget
-            if (sticky != null) {
-                val timePassed = targetTracker.stickyTimer.hasTimePassed((samePlayerDuration * 1000).toLong())
-                if (!sticky.isAlive || timePassed) {
-                    targetTracker.stickyTarget = null
-                } else {
-                    if (player.squaredBoxedDistanceTo(sticky) <= range.pow(2) && targetTracker.validate(sticky)) {
-                        targetTracker.target = sticky
-                        processTarget(sticky, range, situation)
-                        return
-                    } else {
-                        targetTracker.target = null
-                        return
-                    }
-                }
-            }
-        }
-
-        val maximumRange = if (targetTracker.closestSquaredEnemyDistance > range.pow(2)) {
-            range + currentScanExtraRange
-        } else {
-            range
-        }
-
-        ModuleDebug.debugParameter(ModuleKillAura, "Maximum Range", maximumRange)
-        ModuleDebug.debugParameter(ModuleKillAura, "Range", range)
-        val squaredMaxRange = maximumRange.pow(2)
-        val squaredNormalRange = range.pow(2)
-
-        val target = targetTracker.targets()
-            .filter { entity -> entity.squaredBoxedDistanceTo(player) <= squaredMaxRange }
-            .sortedBy { entity -> if (entity.squaredBoxedDistanceTo(player) <= squaredNormalRange) 0 else 1 }
-            .firstOrNull { entity -> processTarget(entity, maximumRange, situation) }
-
-        if (target != null) {
-            targetTracker.target = target
-        } else if (KillAuraFightBot.enabled) {
-            KillAuraFightBot.updateTarget()
-
-            RotationManager.setRotationTarget(
-                rotations.toRotationTarget(
-                    KillAuraFightBot.getMovementRotation(),
-                    considerInventory = !ignoreOpenInventory
-                ),
-                priority = Priority.IMPORTANT_FOR_USAGE_2,
-                provider = ModuleKillAura
-            )
-        } else {
-            targetTracker.reset()
-        }
-    }
-
-    private fun getShortestAngle(currentYaw: Float, targetYaw: Float): Float {
-        var delta = (targetYaw - currentYaw) % 360.0f
-        if (delta >= 180.0f) {
-            delta -= 360.0f
-        }
-        if (delta < -180.0f) {
-            delta += 360.0f
-        }
-        return currentYaw + delta
-    }
-
-    @Suppress("ReturnCount")
-    private fun processTarget(
-        entity: LivingEntity,
-        maximumRange: Float,
-        situation: PointTracker.AimSituation
-    ): Boolean {
-        val (rotation, _) = getSpot(entity, maximumRange.toDouble(), situation) ?: return false
-        val ticks = rotations.calculateTicks(rotation)
-        ModuleDebug.debugParameter(ModuleKillAura, "Rotation Ticks", ticks)
-
-        val currentYaw = RotationManager.serverRotation.yaw
-        val shortestYaw = getShortestAngle(currentYaw, rotation.yaw)
-        val correctedRotation = Rotation(shortestYaw, rotation.pitch)
-
-        when (rotations.rotationTiming) {
-            SNAP -> if (!clickScheduler.willClickAt(ticks.coerceAtLeast(1))) {
-                return true
-            }
-            ON_TICK -> if (ticks <= 1) {
-                return true
-            }
-            else -> {
-            }
-        }
-
-        RotationManager.setRotationTarget(
-            rotations.toRotationTarget(
-                correctedRotation,
-                entity,
-                considerInventory = !ignoreOpenInventory
-            ),
-            priority = Priority.IMPORTANT_FOR_USAGE_2,
-            provider = this@ModuleKillAura
-        )
-
-        return true
-    }
-
-    private fun getSpot(entity: LivingEntity, range: Double,
-                        situation: PointTracker.AimSituation): RotationWithVector? {
-        val point = pointTracker.gatherPoint(
-            entity,
-            situation
-        )
-
-        val eyes = point.fromPoint
-        val nextPoint = point.toPoint
-
-        ModuleDebug.debugGeometry(this, "Box",
-            ModuleDebug.DebuggedBox(point.box, Color4b.RED.with(a = 60)))
-        ModuleDebug.debugGeometry(this, "CutOffBox",
-            ModuleDebug.DebuggedBox(point.cutOffBox, Color4b.GREEN.with(a = 90)))
-        ModuleDebug.debugGeometry(this, "Point", ModuleDebug.DebuggedPoint(nextPoint, Color4b.WHITE))
-
-        val rotationPreference = LeastDifferencePreference.leastDifferenceToLastPoint(eyes, nextPoint)
-
-        val spot = raytraceBox(
-            eyes, point.cutOffBox,
-            range = range,
-            wallsRange = wallRange.toDouble(),
-            rotationPreference = rotationPreference
-        ) ?: raytraceBox(
-            eyes, point.box,
-            range = range,
-            wallsRange = wallRange.toDouble(),
-            rotationPreference = rotationPreference
-        )
-
-        return if (spot == null && rotations.aimThroughWalls) {
-            val throughSpot = raytraceBox(
-                eyes, point.cutOffBox,
-                range = range,
-                wallsRange = range,
-                rotationPreference = rotationPreference
-            ) ?: raytraceBox(
-                eyes, point.box,
-                range = range,
-                wallsRange = range,
-                rotationPreference = rotationPreference
-            )
-
-            throughSpot
-        } else {
-            spot
-        }
-    }
-
-    internal fun validateAttack(target: Entity? = null): Boolean {
-        val criticalHit = target == null || player.isGliding || criticalsSelectionMode.isCriticalHit(target)
-        val isInInventoryScreen = isInventoryOpen || isInContainerScreen
-
-        return criticalHit && !(isInInventoryScreen && !ignoreOpenInventory && !simulateInventoryClosing)
-    }
-
-    enum class RaycastMode(override val choiceName: String) : NamedChoice {
-        TRACE_NONE("None"),
-        TRACE_ONLYENEMY("Enemy"),
-        TRACE_ALL("All")
-    }
-}
+            MovementAnalyzer.is

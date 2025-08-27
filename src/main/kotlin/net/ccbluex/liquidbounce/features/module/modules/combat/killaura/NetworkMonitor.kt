@@ -47,7 +47,7 @@ object NetworkMonitor {
      * Lấy giá trị ping trung bình đã được làm mịn.
      */
     fun getSmoothedPing(): Double {
-        if (pingHistory.isEmpty()) return 50.0 // Trả về một giá trị mặc định an toàn
+        if (pingHistory.isEmpty()) return 50.0 // giá trị mặc định an toàn
         return pingHistory.map { it.toDouble() }.average()
     }
 
@@ -98,17 +98,17 @@ object NetworkMonitor {
     // --- Các hàm Placeholder (Cần được lập trình viên hiện thực hóa) ---
 
     private fun getPacketLoss(): Double {
-        // TODO: Lập trình viên cần hiện thực hóa logic đo packet loss ở đây.
+        // TODO: hiện thực hóa logic đo packet loss ở đây.
         return 0.0
     }
 
     private fun getServerTPS(): Double {
-        // TODO: Lập trình viên cần hiện thực hóa logic lấy TPS từ server.
+        // TODO: hiện thực hóa logic lấy TPS từ server.
         return 20.0
     }
 
     private fun getPredictionAccuracyScore(): Double {
-        // TODO: Lập trình viên cần hiện thực hóa logic "backtest" ở đây.
+        // TODO: hiện thực hóa logic "backtest" ở đây.
         return 1.0
     }
 
@@ -116,9 +116,10 @@ object NetworkMonitor {
 
     /**
      * Hàm chính mà KillAura sẽ gọi.
-     * @return Giá trị ping cuối cùng để sử dụng (mili giây).
+     * Nó áp dụng các quy tắc và mô hình để trả về giá trị ping (ms) nên dùng.
      */
     fun getFinalPingDecision(): Double {
+        // Các quy tắc ngắt mạch ưu tiên
         if (getPacketLoss() > PACKET_LOSS_THRESHOLD ||
             getServerTPS() < TPS_THRESHOLD ||
             getPredictionAccuracyScore() < PREDICTION_ACCURACY_THRESHOLD

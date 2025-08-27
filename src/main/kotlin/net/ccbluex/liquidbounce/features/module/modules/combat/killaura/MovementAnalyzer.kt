@@ -5,17 +5,15 @@ import net.minecraft.util.math.Vec3d
 import kotlin.math.*
 
 /**
- * MovementAnalyzer - Module chuyên phân tích và dự đoán chuyển động với độ chính xác cao.
- * Phiên bản tương thích với Minecraft 1.21.4.
+ * MovementAnalyzer - Module phân tích và dự đoán chuyển động.
+ * Phiên bản tương thích với các API/field được sử dụng trong repo.
  */
 object MovementAnalyzer {
-    // --- Cấu hình ---
     private const val MOVEMENT_HISTORY_SIZE = 20
     private const val PREDICTION_TICKS = 3
     private const val MAX_REASONABLE_ACCELERATION = 5.0
     private const val ANOMALY_DETECTION_THRESHOLD = 3.0
 
-    // --- Bộ nhớ chuyển động ---
     private val velocityHistory = mutableMapOf<Int, ArrayDeque<Vec3d>>()
     private val positionHistory = mutableMapOf<Int, ArrayDeque<Vec3d>>()
     private val entityUpdateTimes = mutableMapOf<Int, Long>()
@@ -30,7 +28,7 @@ object MovementAnalyzer {
         if (velHistory.size >= MOVEMENT_HISTORY_SIZE) velHistory.removeFirst()
         if (posHistory.size >= MOVEMENT_HISTORY_SIZE) posHistory.removeFirst()
 
-        // NOTE: depending on Minecraft mapping/version these properties may be named differently.
+        // NOTE: nếu mapping khác, đổi entity.velocity / entity.pos tương ứng
         velHistory.addLast(entity.velocity)
         posHistory.addLast(entity.pos)
         entityUpdateTimes[entityId] = currentTime
@@ -46,7 +44,7 @@ object MovementAnalyzer {
         val sourceVelocity = source.velocity
         val directionToTarget = target.pos.subtract(source.pos).normalize()
         val speedTowardsTargetPerTick = sourceVelocity.dotProduct(directionToTarget)
-        return max(0.0, speedTowardsTargetPerTick * 20.0)
+        return max(0.0, speedTowardsTargetPerTick * 20.0) // blocks/second
     }
 
     fun getMovementDirection(entity: Entity): Vec3d {
@@ -208,9 +206,7 @@ object MovementAnalyzer {
     fun estimateTimeToReachTarget(source: Entity, target: Entity): Double {
         val distance = source.pos.distanceTo(target.pos)
         val speedTowardsTarget = getSpeedTowardsTarget(source, target)
-
         if (speedTowardsTarget <= 0.1) return Double.MAX_VALUE
-
         return distance / speedTowardsTarget
     }
 
