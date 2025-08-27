@@ -85,6 +85,12 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
     }
 
+    // --- THÊM CẤU HÌNH MỚI ---
+    val predictionAggressiveness by float("PredictionAggressiveness", 1.0f, 0.0f..2.0f)
+    // 0.0 = An toàn (không tin vào dự đoán)
+    // 1.0 = Cân bằng (tin tưởng dự đoán dựa trên confidence)
+    // 2.0 = Tối đa hiệu quả (luôn tin 100% vào dự đoán)
+
     val samePlayer by boolean("SamePlayer", false)
     private val samePlayerDuration by int("SamePlayerDuration", 5, 1..120, "s")
 
@@ -190,18 +196,19 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             return@tickHandler
         }
 
+        // --- CẬP NHẬT: GHI LẠI TRẠNG THÁI MỤC TIÊU CHO PHÂN TÍCH ---
+        MovementAnalyzer.recordEntityState(target)
+        MovementAnalyzer.recordEntityState(player)
+
         val rotation = (if (rotations.rotationTiming == ON_TICK) {
             getSpot(target, range.toDouble(), PointTracker.AimSituation.FOR_NOW)?.rotation
         } else {
             null
         } ?: RotationManager.currentRotation ?: player.rotation).normalize()
 
-        // ===== BẮT ĐẦU ĐOẠN CODE CẢI TIẾN =====
         val finalTarget = if (samePlayer && targetTracker.stickyTarget != null) {
-            // Nếu SamePlayer đang bật và có mục tiêu ghim, luôn dùng mục tiêu đó làm mục tiêu cuối cùng.
             targetTracker.stickyTarget
         } else {
-            // Nếu không, mới thực hiện logic raycast và tìm mục tiêu dưới con trỏ chuột như cũ.
             val crosshairTarget = when {
                 raycast != TRACE_NONE -> {
                     raytraceEntity(range.toDouble(), rotation, filter = {
@@ -219,14 +226,12 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                 targetTracker.target = crosshairTarget
             }
             
-            crosshairTarget // Mục tiêu cuối cùng trong trường hợp này là kết quả của raycast.
+            crosshairTarget
         }
 
-        // Chỉ thực hiện tấn công nếu có một mục tiêu hợp lệ cuối cùng.
         if (finalTarget != null) {
             attackTarget(this, finalTarget, rotation)
         }
-        // ===== KẾT THÚC ĐOẠN CODE CẢI TIẾN =====
     }
 
     val shouldBlockSprinting
@@ -245,13 +250,18 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     private suspend fun attackTarget(sequence: Sequence, target: Entity, rotation: Rotation) {
         KillAuraAutoBlock.makeSeemBlock()
 
+        // --- TÍNH TOÁN TẦM ĐÁNH HIỆU QUẢ VỚI DỰ ĐOÁN ---
+        val actualReach = range.toDouble()
+        val effectiveReach = calculateEffectiveReach(target)
+
         val isFacingEnemy = facingEnemy(toEntity = target, rotation = rotation,
-            range = range.toDouble(),
+            range = effectiveReach, // SỬ DỤNG TẦM ĐÁNH HIỆU QUẢ
             wallsRange = wallRange.toDouble()) || ModuleElytraTarget.canIgnoreKillAuraRotations
 
         ModuleDebug.debugParameter(ModuleKillAura, "Is Facing Enemy", isFacingEnemy)
         ModuleDebug.debugParameter(ModuleKillAura, "Rotation", rotation)
         ModuleDebug.debugParameter(ModuleKillAura, "Target", target.nameForScoreboard)
+        ModuleDebug.debugParameter(ModuleKillAura, "Effective Reach", effectiveReach)
 
         if (!isFacingEnemy) {
             if (KillAuraAutoBlock.enabled && KillAuraAutoBlock.onScanRange &&
@@ -293,6 +303,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                 GenericDebugRecorder.recordDebugInfo(ModuleKillAura, "attackEntity", JsonObject().apply {
                     add("player", GenericDebugRecorder.debugObject(player))
                     add("targetPos", GenericDebugRecorder.debugObject(target))
+                    add("effectiveReach", GenericDebugRecorder.debugObject(effectiveReach))
                 })
 
                 true
@@ -302,6 +313,48 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             KillAuraAutoBlock.stopBlocking(pauses = true)
         } else {
             KillAuraAutoBlock.startBlocking()
+        }
+    }
+
+    /**
+     * HÀM MỚI: Tính toán tầm đánh hiệu quả với dự đoán chuyển động
+     */
+    private fun calculateEffectiveReach(target: Entity): Double {
+        // --- Thu thập & Tính toán ---
+        val pingMs = NetworkMonitor.getFinalPingDecision()
+        val speed = MovementAnalyzer.getSpeedTowardsTarget(player, target)
+        val confidence = MovementAnalyzer.getPredictionConfidence(target)
+        
+        val predictedDistance = speed * (pingMs / 1000.0)
+
+        // --- Tầng Quyết định & An toàn ---
+
+        // 1. Áp dụng "Hệ số Hung hăng"
+        val aggressionFactor = predictionAggressiveness.coerceIn(0.0f, 2.0f)
+        val confidenceFactor = when {
+            aggressionFactor <= 1.0f -> {
+                confidence * aggressionFactor
+            }
+            else -> {
+                val extraAggression = aggressionFactor - 1.0f
+                (confidence + (1.0 - confidence) * extraAggression).coerceIn(0.0, 1.0)
+            }
+        }
+        val adjustedPredictedDistance = predictedDistance * confidenceFactor
+
+        // 2. Áp dụng cơ chế "Fallback an toàn"
+        val shouldUsePrediction = when {
+            NetworkMonitor.getJitter() > 50.0 -> false
+            MovementAnalyzer.isMovementAnomalous(target) -> false
+            confidence < 0.3 && aggressionFactor < 1.5 -> false
+            else -> true
+        }
+
+        val actualReach = range.toDouble()
+        return if (shouldUsePrediction) {
+            actualReach + adjustedPredictedDistance
+        } else {
+            actualReach
         }
     }
 
@@ -367,9 +420,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     }
 
     /**
-     * HÀM MỚI ĐƯỢC THÊM VÀO ĐỂ SỬA LỖI XOAY GÓC
      * Tính toán đường đi góc quay ngắn nhất từ góc hiện tại đến góc mục tiêu.
-     * Nó xử lý vấn đề "xoay vòng" khi đi qua ranh giới -180/180 độ.
      */
     private fun getShortestAngle(currentYaw: Float, targetYaw: Float): Float {
         var delta = (targetYaw - currentYaw) % 360.0f
@@ -388,16 +439,13 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         maximumRange: Float,
         situation: PointTracker.AimSituation
     ): Boolean {
-        // DÒNG NÀY GIỮ NGUYÊN
         val (rotation, _) = getSpot(entity, maximumRange.toDouble(), situation) ?: return false
         val ticks = rotations.calculateTicks(rotation)
         ModuleDebug.debugParameter(ModuleKillAura, "Rotation Ticks", ticks)
 
-        // ===== BẮT ĐẦU ĐOẠN CODE SỬA LỖI =====
         val currentYaw = RotationManager.serverRotation.yaw
         val shortestYaw = getShortestAngle(currentYaw, rotation.yaw)
         val correctedRotation = Rotation(shortestYaw, rotation.pitch)
-        // ===== KẾT THÚC ĐOẠN CODE SỬA LỖI =====
 
         when (rotations.rotationTiming) {
             SNAP -> if (!clickScheduler.willClickAt(ticks.coerceAtLeast(1))) {
@@ -412,7 +460,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
         RotationManager.setRotationTarget(
             rotations.toRotationTarget(
-                correctedRotation, // <-- QUAN TRỌNG: SỬ DỤNG GÓC QUAY ĐÃ ĐƯỢC SỬA
+                correctedRotation,
                 entity,
                 considerInventory = !ignoreOpenInventory
             ),
