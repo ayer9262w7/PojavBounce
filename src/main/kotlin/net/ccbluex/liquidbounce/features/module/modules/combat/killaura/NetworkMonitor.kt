@@ -1,142 +1,139 @@
-package net.ccbluex.liquidbounce.features.module.modules.combat.killaura
+// NetworkMonitor.kt
+// Ghi nhận ping samples; ước lượng ping dự đoán (EMA), đo packet loss cơ bản (keepalive), và hệ thống pending-predictions
+// NetworkMonitor không cố gắng "bypass anti-cheat" — chỉ giúp đánh giá chất lượng dự đoán.
 
+import net.minecraft.util.math.Vec3d
+import java.util.ArrayDeque
+import kotlin.math.roundToInt
 import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.sqrt
 
-/**
- * NetworkMonitor - Một bộ phân tích sức khỏe mạng toàn diện.
- *
- * Chức năng:
- * - Thu thập và làm mịn dữ liệu ping.
- * - Dự đoán giá trị ping tiếp theo dựa trên xu hướng.
- * - Tự động điều chỉnh dự đoán dựa trên độ ổn định của mạng (Jitter).
- * - Kết hợp các chỉ số khác (Packet Loss, Server TPS) để có quyết định cuối cùng.
- * - Áp dụng các quy tắc an toàn "ngắt mạch" để tránh bị Anti-Cheat phát hiện.
- */
 object NetworkMonitor {
+    // --- Ping history (ms) ---
+    private val pingHistory = ArrayDeque<Long>()
+    private const val PING_HISTORY_SIZE = 200
 
-    // --- Cấu hình ---
-    private const val HISTORY_SIZE = 20 // Số lượng giá trị ping để lưu lại
+    // --- Keepalive counters cho packet loss estimation ---
+    private var sentKeepalives: Long = 0
+    private var acksReceived: Long = 0
 
-    // Ngưỡng cho mô hình lai
-    private const val MIN_JITTER = 5.0  // Dưới ngưỡng này, mạng được coi là hoàn hảo
-    private const val MAX_JITTER = 25.0 // Trên ngưỡng này, mạng được coi là rất bất ổn
+    // --- Prediction backtest storage ---
+    private val predictionErrors = ArrayDeque<Double>()
+    private const val PREDICTION_ERROR_HISTORY = 120
+    private var clientTickCounter: Long = 0
 
-    // Ngưỡng cho các quy tắc "Ngắt Mạch" an toàn
-    private const val PACKET_LOSS_THRESHOLD = 0.05 // 5%
-    private const val TPS_THRESHOLD = 15.0 // 15 Ticks Per Second
-    private const val PREDICTION_ACCURACY_THRESHOLD = 0.7 // 70%
+    data class PendingPrediction(
+        val entityId: Int,
+        val predictedPos: Vec3d,
+        val ticksAhead: Int,
+        val createdTick: Long
+    )
 
-    // --- Bộ nhớ ---
-    private val pingHistory = ArrayDeque<Long>(HISTORY_SIZE)
+    private val pendingPredictions = mutableListOf<PendingPrediction>()
 
-    // --- Các hàm cơ bản ---
+    // --- Public API ---
 
     /**
-     * Ghi lại một giá trị ping mới đo được.
+     * Gọi khi có sample ping (ms). Hãy đảm bảo feed latency thực từ network handler.
      */
-    fun recordPing(newPing: Long) {
-        if (pingHistory.size >= HISTORY_SIZE) {
-            pingHistory.removeFirst()
+    fun recordPing(pingMs: Long) {
+        synchronized(pingHistory) {
+            pingHistory.addLast(pingMs)
+            if (pingHistory.size > PING_HISTORY_SIZE) pingHistory.removeFirst()
         }
-        pingHistory.addLast(newPing)
     }
 
     /**
-     * Lấy giá trị ping trung bình đã được làm mịn.
+     * Gọi khi client gửi keepalive (nếu bạn hook được).
      */
-    fun getSmoothedPing(): Double {
-        if (pingHistory.isEmpty()) return 50.0 // giá trị mặc định an toàn
-        return pingHistory.map { it.toDouble() }.average()
+    fun recordSentKeepalive() {
+        sentKeepalives++
     }
 
     /**
-     * Tính toán độ bất ổn của mạng (Jitter).
+     * Gọi khi client nhận ack keepalive (nếu có).
      */
-    fun getJitter(): Double {
-        val n = pingHistory.size
-        if (n < 2) return 0.0
-        val mean = getSmoothedPing()
-        val variance = pingHistory.map { (it.toDouble() - mean) * (it.toDouble() - mean) }.average()
-        return sqrt(variance)
+    fun recordAckReceived() {
+        acksReceived++
     }
 
-    // --- Các hàm dự đoán ---
+    /**
+     * Trả estimated packet loss 0.0..1.0
+     */
+    fun getPacketLoss(): Double {
+        if (sentKeepalives == 0L) return 0.0
+        val loss = 1.0 - (acksReceived.toDouble() / sentKeepalives.toDouble())
+        return loss.coerceIn(0.0, 1.0)
+    }
 
     /**
-     * Dự đoán giá trị ping tiếp theo bằng Hồi quy Tuyến tính.
+     * Đăng ký prediction để backtest later.
+     * ModuleKillAura nên gọi registerPrediction(...) mỗi khi dự đoán vị trí.
      */
-    private fun predictNextPing(): Double {
-        val n = pingHistory.size
-        if (n < 2) return getSmoothedPing()
+    fun registerPrediction(entityId: Int, predictedPos: Vec3d, ticksAhead: Int) {
+        pendingPredictions.add(PendingPrediction(entityId, predictedPos, ticksAhead, clientTickCounter))
+    }
 
-        val points = pingHistory.toList()
-        var sumX = 0.0
-        var sumY = 0.0
-        var sumXY = 0.0
-        var sumX2 = 0.0
-
-        for (i in 0 until n) {
-            val x = (i + 1).toDouble()
-            val y = points[i].toDouble()
-            sumX += x
-            sumY += y
-            sumXY += x * y
-            sumX2 += x * x
+    /**
+     * Gọi mỗi client tick (ModuleKillAura.onTick hoặc chung tick handler).
+     * Dùng để đánh giá pending predictions khi đủ age.
+     */
+    fun onClientTick() {
+        clientTickCounter++
+        val toEval = mutableListOf<PendingPrediction>()
+        val iterator = pendingPredictions.iterator()
+        while (iterator.hasNext()) {
+            val p = iterator.next()
+            val age = clientTickCounter - p.createdTick
+            if (age >= p.ticksAhead) {
+                toEval.add(p)
+                iterator.remove()
+            }
         }
-
-        val denominator = (n * sumX2 - sumX * sumX)
-        if (kotlin.math.abs(denominator) < 1e-9) return getSmoothedPing()
-
-        val m = (n * sumXY - sumX * sumY) / denominator
-        val b = (sumY - m * sumX) / n
-
-        return m * (n + 1) + b
+        for (p in toEval) {
+            val actual = MovementAnalyzer.getLatestPosition(p.entityId)
+            if (actual != null) {
+                val err = actual.distanceTo(p.predictedPos)
+                recordPredictionError(err)
+            } else {
+                // nếu không có actual, tạm phạt nhẹ
+                recordPredictionError(2.0)
+            }
+        }
     }
-
-    // --- Các hàm Placeholder (Cần được lập trình viên hiện thực hóa) ---
-
-    private fun getPacketLoss(): Double {
-        // TODO: hiện thực hóa logic đo packet loss ở đây.
-        return 0.0
-    }
-
-    private fun getServerTPS(): Double {
-        // TODO: hiện thực hóa logic lấy TPS từ server.
-        return 20.0
-    }
-
-    private fun getPredictionAccuracyScore(): Double {
-        // TODO: hiện thực hóa logic "backtest" ở đây.
-        return 1.0
-    }
-
-    // --- Hàm Quyết định Cuối cùng ---
 
     /**
-     * Hàm chính mà KillAura sẽ gọi.
-     * Nó áp dụng các quy tắc và mô hình để trả về giá trị ping (ms) nên dùng.
+     * Return prediction accuracy score 0..1 (1 = perfect).
      */
-    fun getFinalPingDecision(): Double {
-        // Các quy tắc ngắt mạch ưu tiên
-        if (getPacketLoss() > PACKET_LOSS_THRESHOLD ||
-            getServerTPS() < TPS_THRESHOLD ||
-            getPredictionAccuracyScore() < PREDICTION_ACCURACY_THRESHOLD
-        ) {
-            return getSmoothedPing()
+    fun getPredictionAccuracyScore(): Double {
+        synchronized(predictionErrors) {
+            if (predictionErrors.isEmpty()) return 1.0
+            val mean = predictionErrors.average()
+            val threshold = 4.0 // mean error 4 blocks => score 0
+            return (1.0 - (mean / threshold)).coerceIn(0.0, 1.0)
         }
+    }
 
-        val smoothed = getSmoothedPing()
-        val predicted = predictNextPing()
-        val jitter = getJitter()
-        val accuracy = getPredictionAccuracyScore()
+    // --- Helpers ---
 
-        val jitterFactor = max(0.0, min(1.0, (jitter - MIN_JITTER) / (MAX_JITTER - MIN_JITTER)))
-        val accuracyFactor = 1.0 - accuracy
+    private fun recordPredictionError(errMeters: Double) {
+        synchronized(predictionErrors) {
+            predictionErrors.addLast(errMeters)
+            if (predictionErrors.size > PREDICTION_ERROR_HISTORY) predictionErrors.removeFirst()
+        }
+    }
 
-        val finalInstabilityFactor = max(jitterFactor, accuracyFactor)
-
-        return (predicted * (1.0 - finalInstabilityFactor)) + (smoothed * finalInstabilityFactor)
+    /**
+     * Trả predicted ping (ms) bằng EMA smoothing trên lịch sử ping.
+     */
+    fun getPredictedPingMs(): Double {
+        synchronized(pingHistory) {
+            if (pingHistory.isEmpty()) return 50.0
+            val alpha = 0.2
+            var ema = pingHistory.first().toDouble()
+            for (p in pingHistory) {
+                ema = alpha * p + (1 - alpha) * ema
+            }
+            return ema
+        }
     }
 }

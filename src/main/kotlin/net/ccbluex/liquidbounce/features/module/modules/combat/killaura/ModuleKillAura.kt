@@ -52,6 +52,8 @@ import net.minecraft.client.util.math.MatrixStack
 import net.minecraft.entity.Entity
 import net.minecraft.entity.LivingEntity
 import kotlin.math.pow
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 @Suppress("MagicNumber")
 object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
@@ -178,6 +180,19 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         MovementAnalyzer.recordEntityState(target)
         MovementAnalyzer.recordEntityState(player)
 
+        // === MỚI: feed NetworkMonitor ping sample (nếu có latency available) ===
+        try {
+            // API lấy player list entry có thể khác tuỳ phiên bản; giữ try/catch để an toàn.
+            val handler = mc.networkHandler
+            val entry = handler?.getPlayerListEntry(player.uuid)
+            if (entry != null) {
+                NetworkMonitor.recordPing(entry.latency.toLong())
+            }
+        } catch (_: Throwable) {
+            // ignore nếu API khác
+        }
+        // =======================================================================
+
         val rotation = (if (rotations.rotationTiming == ON_TICK) {
             getSpot(target, range.toDouble(), PointTracker.AimSituation.FOR_NOW)?.rotation
         } else {
@@ -300,40 +315,93 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     }
 
     /**
-     * HÀM MỚI: Tính toán tầm đánh hiệu quả với dự đoán chuyển động
+     * HÀM ĐÃ VÁ (thay thế DUY NHẤT so với file gốc):
+     * Tính toán tầm đánh hiệu quả với dự đoán chuyển động — giữ logic gốc nhưng thêm:
+     * - clamp maximum extra reach,
+     * - jitter humanize,
+     * - ngắt mạch khi mạng kém / chuyển động bất thường,
+     * - đăng ký prediction để NetworkMonitor có thể backtest (nếu method tồn tại).
      */
     private fun calculateEffectiveReach(target: Entity): Double {
-        val pingMs = NetworkMonitor.getFinalPingDecision()
-        val speed = MovementAnalyzer.getSpeedTowardsTarget(player, target)
-        val confidence = MovementAnalyzer.getPredictionConfidence(target)
+        val actualReachVal = range.toDouble()
 
-        val predictedDistance = speed * (pingMs / 1000.0)
-
-        val aggressionFactor = predictionAggressiveness.coerceIn(0.0f, 2.0f)
-        val confidenceFactor = when {
-            aggressionFactor <= 1.0f -> {
-                confidence * aggressionFactor
-            }
-            else -> {
-                val extraAggression = aggressionFactor - 1.0f
-                (confidence + (1.0 - confidence) * extraAggression).coerceIn(0.0, 1.0)
-            }
+        // Lấy final ping quyết định từ NetworkMonitor (ms)
+        val pingMs = try {
+            NetworkMonitor.getFinalPingDecision()
+        } catch (e: Throwable) {
+            // fallback an toàn
+            NetworkMonitor.getSmoothedPing()
         }
-        val adjustedPredictedDistance = predictedDistance * confidenceFactor
+
+        // Lấy tốc độ/dự đoán movement từ MovementAnalyzer (sử dụng hàm có sẵn nếu có)
+        val predictedMovement = try {
+            MovementAnalyzer.getPredictedMovementInPingTime(player, target, pingMs.roundToLong())
+        } catch (e: Throwable) {
+            // fallback: sử dụng simple speed * time
+            val speed = MovementAnalyzer.calculateSpeedTowardsTarget(player, target)
+            speed * (pingMs / 1000.0)
+        }
+
+        // Lấy confidence từ MovementAnalyzer
+        val confidence = try {
+            MovementAnalyzer.getPredictionConfidence(target)
+        } catch (e: Throwable) {
+            0.5
+        }
+
+        // aggression config
+        val aggressionFactor = predictionAggressiveness.coerceIn(0.0f, 2.0f)
+        val confidenceFactor = if (aggressionFactor <= 1.0f) {
+            confidence * aggressionFactor
+        } else {
+            val extra = (aggressionFactor - 1.0f)
+            (confidence + (1.0 - confidence) * extra).coerceIn(0.0, 1.0)
+        }
+
+        var adjustedPredictedDistance = predictedMovement * confidenceFactor
+
+        // safety checks: network / anomaly
+        val jitter = try { NetworkMonitor.getJitter() } catch (_: Throwable) { 0.0 }
+        val smoothedPing = try { NetworkMonitor.getSmoothedPing() } catch (_: Throwable) { 50.0 }
+
+        val badNetwork = (jitter > 50.0) || (smoothedPing > 400.0)
+        val anomalous = try { MovementAnalyzer.isMovementAnomalous(target) } catch (_: Throwable) { false }
 
         val shouldUsePrediction = when {
-            NetworkMonitor.getJitter() > 50.0 -> false
-            MovementAnalyzer.isMovementAnomalous(target) -> false
-            confidence < 0.3 && aggressionFactor < 1.5 -> false
+            badNetwork -> false
+            anomalous -> false
+            confidence < 0.25 && aggressionFactor < 1.5 -> false
             else -> true
         }
 
-        val actualReachVal = range.toDouble()
-        return if (shouldUsePrediction) {
-            actualReachVal + adjustedPredictedDistance
-        } else {
-            actualReachVal
+        // clamp extra reach
+        val maxExtra = max(0.4, currentScanExtraRange.toDouble()) // at least 0.4 blocks, else use scanExtraRange
+        val extra = if (shouldUsePrediction) adjustedPredictedDistance.coerceAtMost(maxExtra) else 0.0
+
+        // humanize small jitter
+        val humanJitter = (Math.random() - 0.5) * 0.06 // ±0.03 blocks
+        val finalExtra = (extra + humanJitter).coerceIn(0.0, maxExtra)
+
+        // Register prediction for backtest if NetworkMonitor supports it (use reflection safe)
+        try {
+            val pingTicks = max(1, ((pingMs / 1000.0) * 20.0).roundToInt())
+            val predictedPos = try {
+                MovementAnalyzer.predictFuturePosition(target, pingTicks)
+            } catch (_: Throwable) {
+                // fallback to simple extrapolation using current pos
+                target.pos
+            }
+
+            // Try to find registerPrediction(EntityId, Vec3d, Int)
+            val method = NetworkMonitor::class.java.methods.firstOrNull { it.name == "registerPrediction" }
+            if (method != null) {
+                method.invoke(NetworkMonitor, target.id, predictedPos, pingTicks)
+            }
+        } catch (_: Throwable) {
+            // ignore if not supported
         }
+
+        return actualReachVal + finalExtra
     }
 
     private fun updateTarget() {

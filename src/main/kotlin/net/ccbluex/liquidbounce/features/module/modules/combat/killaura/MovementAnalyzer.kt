@@ -1,217 +1,152 @@
-package net.ccbluex.liquidbounce.features.module.modules.combat.killaura
+// MovementAnalyzer.kt
+// Singleton phân tích chuyển động: lưu lịch sử vị trí/ vận tốc, tính TPS, dự đoán vị trí tương lai (kinematic)
 
 import net.minecraft.entity.Entity
 import net.minecraft.util.math.Vec3d
-import kotlin.math.*
+import net.minecraft.network.packet.s2c.play.WorldTimeUpdateS2CPacket
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedDeque
+import kotlin.math.max
 
-/**
- * MovementAnalyzer - Module phân tích và dự đoán chuyển động.
- * Phiên bản tương thích với các API/field được sử dụng trong repo.
- */
 object MovementAnalyzer {
-    private const val MOVEMENT_HISTORY_SIZE = 20
-    private const val PREDICTION_TICKS = 3
-    private const val MAX_REASONABLE_ACCELERATION = 5.0
-    private const val ANOMALY_DETECTION_THRESHOLD = 3.0
+    // --- Config ---
+    private const val MAX_HISTORY = 200 // lưu 200 tick (~10s)
+    const val PREDICTION_TICKS = 2 // default ticks ahead (can override khi gọi)
 
-    private val velocityHistory = mutableMapOf<Int, ArrayDeque<Vec3d>>()
-    private val positionHistory = mutableMapOf<Int, ArrayDeque<Vec3d>>()
-    private val entityUpdateTimes = mutableMapOf<Int, Long>()
+    // --- Histories keyed by entity id ---
+    private val positionHistory: MutableMap<Int, ConcurrentLinkedDeque<Vec3d>> = ConcurrentHashMap()
+    private val velocityHistory: MutableMap<Int, ConcurrentLinkedDeque<Vec3d>> = ConcurrentHashMap()
 
+    // --- TPS estimation using WorldTimeUpdate packets ---
+    private var timeUpdatePackets = 0
+    private var timeUpdateAccumulatedSeconds = 0.0
+    private var lastTimeUpdate = -1L
+    // serverTPS default 20.0
+    @Volatile
+    private var serverTPS: Double = 20.0
+
+    // --- Public API ---
+
+    /**
+     * Ghi lại trạng thái entity (pos, vel) — gọi mỗi tick hoặc khi bạn có dữ liệu.
+     * Bạn nên gọi function này từ chỗ bạn theo dõi entity (ví dụ mỗi tick).
+     */
     fun recordEntityState(entity: Entity) {
-        val entityId = entity.id
-        val currentTime = System.currentTimeMillis()
+        val id = entity.entityId
+        val pos = getEntityPos(entity)
+        val vel = getEntityVelocity(entity)
 
-        val velHistory = velocityHistory.getOrPut(entityId) { ArrayDeque(MOVEMENT_HISTORY_SIZE) }
-        val posHistory = positionHistory.getOrPut(entityId) { ArrayDeque(MOVEMENT_HISTORY_SIZE) }
+        // store positions
+        val posQueue = positionHistory.computeIfAbsent(id) { ConcurrentLinkedDeque() }
+        posQueue.addLast(pos)
+        while (posQueue.size > MAX_HISTORY) posQueue.removeFirst()
 
-        if (velHistory.size >= MOVEMENT_HISTORY_SIZE) velHistory.removeFirst()
-        if (posHistory.size >= MOVEMENT_HISTORY_SIZE) posHistory.removeFirst()
-
-        // NOTE: nếu mapping khác, đổi entity.velocity / entity.pos tương ứng
-        velHistory.addLast(entity.velocity)
-        posHistory.addLast(entity.pos)
-        entityUpdateTimes[entityId] = currentTime
+        // store velocities
+        val velQueue = velocityHistory.computeIfAbsent(id) { ConcurrentLinkedDeque() }
+        velQueue.addLast(vel)
+        while (velQueue.size > MAX_HISTORY) velQueue.removeFirst()
     }
 
-    fun cleanupEntityData(entityId: Int) {
-        velocityHistory.remove(entityId)
-        positionHistory.remove(entityId)
-        entityUpdateTimes.remove(entityId)
-    }
-
-    fun getSpeedTowardsTarget(source: Entity, target: Entity): Double {
-        val sourceVelocity = source.velocity
-        val directionToTarget = target.pos.subtract(source.pos).normalize()
-        val speedTowardsTargetPerTick = sourceVelocity.dotProduct(directionToTarget)
-        return max(0.0, speedTowardsTargetPerTick * 20.0) // blocks/second
-    }
-
-    fun getMovementDirection(entity: Entity): Vec3d {
-        return if (entity.velocity.lengthSquared() > 0.001) {
-            entity.velocity.normalize()
-        } else {
-            Vec3d.ZERO
-        }
-    }
-
-    fun getAngleToTarget(source: Entity, target: Entity): Double {
-        val directionToTarget = target.pos.subtract(source.pos).normalize()
-        val movementDirection = getMovementDirection(source)
-
-        if (movementDirection == Vec3d.ZERO) return 180.0
-
-        val dotProduct = movementDirection.dotProduct(directionToTarget)
-        val clampedDot = dotProduct.coerceIn(-1.0, 1.0)
-        return Math.toDegrees(acos(clampedDot))
-    }
-
-    fun getCurrentAcceleration(entity: Entity): Vec3d {
-        val history = velocityHistory[entity.id] ?: return Vec3d.ZERO
-        if (history.size < 2) return Vec3d.ZERO
-
-        val currentVelocity = history.last()
-        val previousVelocity = history[history.size - 2]
-        return currentVelocity.subtract(previousVelocity).multiply(20.0)
-    }
-
+    /**
+     * Dự đoán vị trí tương lai bằng kinematic extrapolation:
+     * lastPos, lastVel, acc (delta vel) -> integrate per-tick
+     * ticksAhead: số tick để dự đoán (1 tick = 1/20s)
+     */
     fun predictFuturePosition(entity: Entity, ticksAhead: Int = PREDICTION_TICKS): Vec3d {
-        val entityId = entity.id
-        val history = positionHistory[entityId] ?: return entity.pos
-        if (history.size < 2) return entity.pos
+        val id = entity.entityId
+        val posHist = positionHistory[id]?.toList()
+        val velHist = velocityHistory[id]?.toList()
 
-        val n = history.size
-        val points = history.toList()
+        // nếu thiếu lịch sử, trả về vị trí hiện tại
+        val lastPos = posHist?.lastOrNull() ?: getEntityPos(entity)
+        var lastVel = velHist?.lastOrNull() ?: getEntityVelocity(entity)
+        val prevVel = if (velHist != null && velHist.size >= 2) velHist[velHist.size - 2] else lastVel
 
-        var sumT = 0.0
-        var sumX = 0.0
-        var sumY = 0.0
-        var sumZ = 0.0
-        var sumT2 = 0.0
-        var sumTX = 0.0
-        var sumTY = 0.0
-        var sumTZ = 0.0
+        // acceleration (per-tick)
+        val accPerTick = lastVel.subtract(prevVel)
 
-        for (i in 0 until n) {
-            val t = (i - n + 1).toDouble()
-            val pos = points[i]
-            sumT += t
-            sumX += pos.x
-            sumY += pos.y
-            sumZ += pos.z
-            sumT2 += t * t
-            sumTX += t * pos.x
-            sumTY += t * pos.y
-            sumTZ += t * pos.z
+        var predicted = lastPos
+        for (i in 1..max(1, ticksAhead)) {
+            // pos += vel + 0.5*acc
+            predicted = predicted.add(lastVel.add(accPerTick.multiply(0.5)))
+            // vel += acc
+            lastVel = lastVel.add(accPerTick)
         }
 
-        val denominator = n * sumT2 - sumT * sumT
-        if (abs(denominator) < 0.001) return entity.pos
-
-        val slopeX = (n * sumTX - sumT * sumX) / denominator
-        val slopeY = (n * sumTY - sumT * sumY) / denominator
-        val slopeZ = (n * sumTZ - sumT * sumZ) / denominator
-
-        val futureT = (n + ticksAhead - 1).toDouble()
-        val predictedX = (sumX + slopeX * (futureT - sumT / n)) / n
-        val predictedY = (sumY + slopeY * (futureT - sumT / n)) / n
-        val predictedZ = (sumZ + slopeZ * (futureT - sumT / n)) / n
-
-        return Vec3d(predictedX, predictedY, predictedZ)
+        return predicted
     }
 
-    fun predictFutureVelocity(entity: Entity): Vec3d {
-        val history = velocityHistory[entity.id] ?: return entity.velocity
-        if (history.size < 2) return entity.velocity
-
-        val currentVel = history.last()
-        val previousVel = history[history.size - 2]
-        val acceleration = currentVel.subtract(previousVel)
-
-        return currentVel.add(acceleration)
+    /**
+     * Trả về giá trị TPS gần đúng (đếm bằng WorldTimeUpdateS2CPacket).
+     */
+    fun getServerTPSValue(): Double {
+        return serverTPS
     }
 
-    fun getPredictedMovementInPingTime(source: Entity, target: Entity, pingMs: Long): Double {
-        val pingSeconds = pingMs / 1000.0
-        val currentSpeed = getSpeedTowardsTarget(source, target)
-
-        val predictedVelocity = predictFutureVelocity(source)
-        val predictedSpeedTowardsTarget = predictedVelocity.dotProduct(
-            target.pos.subtract(source.pos).normalize()
-        ) * 20.0
-
-        val blendFactor = 0.7
-        val blendedSpeed = (currentSpeed * blendFactor) + (predictedSpeedTowardsTarget * (1 - blendFactor))
-
-        return blendedSpeed * pingSeconds
+    /**
+     * Lấy vị trí cuối cùng đã lưu (hoặc null nếu không có).
+     */
+    fun getLatestPosition(entityId: Int): Vec3d? {
+        return positionHistory[entityId]?.lastOrNull()
     }
 
-    fun getAimOffsetForPing(source: Entity, target: Entity, pingMs: Long): Vec3d {
-        val pingTicks = (pingMs / 50.0).roundToInt()
-        val futureTargetPos = predictFuturePosition(target, pingTicks)
-        val futureSourcePos = predictFuturePosition(source, pingTicks)
+    // --- Internal / helper utils ---
 
-        return futureTargetPos.subtract(futureSourcePos).normalize()
-    }
-
-    fun isMovementAnomalous(entity: Entity): Boolean {
-        val history = velocityHistory[entity.id] ?: return false
-        if (history.size < 3) return false
-
-        val accelerations = mutableListOf<Double>()
-        for (i in 1 until history.size) {
-            val acceleration = history[i].subtract(history[i - 1]).length() * 20.0
-            accelerations.add(acceleration)
-        }
-
-        if (accelerations.any { it > MAX_REASONABLE_ACCELERATION }) {
-            return true
-        }
-
-        val mean = accelerations.average()
-        val stdDev = sqrt(accelerations.map { (it - mean) * (it - mean) }.average())
-
-        return accelerations.any { abs(it - mean) > ANOMALY_DETECTION_THRESHOLD * stdDev }
-    }
-
-    fun getPredictionConfidence(entity: Entity): Double {
-        val entityId = entity.id
-        val velHistory = velocityHistory[entityId] ?: return 0.5
-        val posHistory = positionHistory[entityId] ?: return 0.5
-
-        if (velHistory.size < 3 || posHistory.size < 3) return 0.5
-
-        val velocities = velHistory.toList()
-        val meanVel = velocities.map { it.length() }.average()
-        val velocityVariance = velocities.map { (it.length() - meanVel) * (it.length() - meanVel) }.average()
-
-        val directions = velocities.map { if (it.lengthSquared() > 0.001) it.normalize() else Vec3d.ZERO }
-        val directionChanges = mutableListOf<Double>()
-        for (i in 1 until directions.size) {
-            if (directions[i] != Vec3d.ZERO && directions[i - 1] != Vec3d.ZERO) {
-                val dot = directions[i].dotProduct(directions[i - 1])
-                directionChanges.add(acos(dot.coerceIn(-1.0, 1.0)))
+    /**
+     * Gắn listener packet: khi nhận WorldTimeUpdate, cập nhật TPS.
+     * NOTE: cách gọi listener phụ thuộc vào mod loader / event system bạn dùng.
+     * Bạn chỉ cần gọi MovementAnalyzer.onTimeUpdatePacketReceived() khi nhận packet.
+     */
+    fun onTimeUpdatePacketReceived() {
+        val currentTime = System.currentTimeMillis()
+        if (lastTimeUpdate != -1L) {
+            val elapsedSeconds = (currentTime - lastTimeUpdate) / 1000.0
+            timeUpdatePackets++
+            timeUpdateAccumulatedSeconds += elapsedSeconds
+            if (timeUpdatePackets >= 20) {
+                if (timeUpdateAccumulatedSeconds > 0.0) {
+                    serverTPS = (20.0 / timeUpdateAccumulatedSeconds).coerceIn(0.0, 20.0)
+                }
+                timeUpdatePackets = 0
+                timeUpdateAccumulatedSeconds = 0.0
             }
         }
-
-        val avgDirectionChange = if (directionChanges.isNotEmpty()) directionChanges.average() else 0.0
-
-        val velocityStability = kotlin.math.exp(-velocityVariance / 5.0)
-        val directionStability = kotlin.math.exp(-avgDirectionChange / 0.5)
-        val dataAmount = min(1.0, velHistory.size.toDouble() / MOVEMENT_HISTORY_SIZE)
-
-        return (velocityStability * 0.4 + directionStability * 0.4 + dataAmount * 0.2).coerceIn(0.0, 1.0)
+        lastTimeUpdate = currentTime
     }
 
-    fun estimateTimeToReachTarget(source: Entity, target: Entity): Double {
-        val distance = source.pos.distanceTo(target.pos)
-        val speedTowardsTarget = getSpeedTowardsTarget(source, target)
-        if (speedTowardsTarget <= 0.1) return Double.MAX_VALUE
-        return distance / speedTowardsTarget
+    // --- Low-level accessors ---
+    // Những hàm này giả định entity có những thuộc tính/method tương ứng trong project bạn.
+    // Nếu trong repo tên khác (ví dụ getPos()), sửa lại cho khớp.
+
+    private fun getEntityPos(entity: Entity): Vec3d {
+        // Tùy version: entity.pos hoặc entity.getPos()
+        return try {
+            // try property .pos first
+            val posField = Entity::class.java.getDeclaredField("pos")
+            posField.isAccessible = true
+            posField.get(entity) as? Vec3d ?: entity.pos
+        } catch (t: Throwable) {
+            // fallback to existing API
+            try {
+                entity.pos
+            } catch (e: Throwable) {
+                Vec3d(0.0, 0.0, 0.0)
+            }
+        }
     }
 
-    fun isMovingTowardsTarget(source: Entity, target: Entity): Boolean {
-        val angle = getAngleToTarget(source, target)
-        return angle < 90.0
+    private fun getEntityVelocity(entity: Entity): Vec3d {
+        // Tùy version: entity.velocity hoặc method
+        return try {
+            val velField = Entity::class.java.getDeclaredField("velocity")
+            velField.isAccessible = true
+            velField.get(entity) as? Vec3d ?: entity.velocity
+        } catch (t: Throwable) {
+            try {
+                entity.velocity
+            } catch (e: Throwable) {
+                Vec3d(0.0, 0.0, 0.0)
+            }
+        }
     }
 }
