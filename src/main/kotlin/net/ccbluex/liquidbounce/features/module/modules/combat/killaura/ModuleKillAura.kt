@@ -249,13 +249,9 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         val effectiveReach = calculateEffectiveReach(target)
 
         // Gọi rõ ràng overload từ player eye -> tránh sự nhầm lẫn khi compiler chọn overload khác
-        val isFacingEnemy = facingEnemy(
-            player,
-            target,
-            rotation,
-            effectiveReach,
-            wallRange.toDouble()
-        ) || ModuleElytraTarget.canIgnoreKillAuraRotations
+        val rayHit = raytraceEntity(effectiveReach, rotation, filter = { it == target || it.shouldBeAttacked() })?.entity
+        val isFacingEnemy = (rayHit == target) || ModuleElytraTarget.canIgnoreKillAuraRotations
+
 
         ModuleDebug.debugParameter(ModuleKillAura, "Is Facing Enemy", isFacingEnemy)
         ModuleDebug.debugParameter(ModuleKillAura, "Rotation", rotation)
