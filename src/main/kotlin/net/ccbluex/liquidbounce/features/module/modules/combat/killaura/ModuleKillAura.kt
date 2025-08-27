@@ -205,13 +205,14 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         } else {
             val crosshairTarget = when {
                 raycast != TRACE_NONE -> {
-                    raytraceEntity(range.toDouble(), rotation, filter = {
+                    val rayHit: Entity? = raytraceEntity(range.toDouble(), rotation, filter = {
                         when (raycast) {
                             TRACE_ONLYENEMY -> it.shouldBeAttacked()
                             TRACE_ALL -> true
                             else -> false
                         }
-                    })?.entity ?: target
+                    })?.entity
+                    rayHit ?: target
                 }
                 else -> target
             }
@@ -249,7 +250,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         val effectiveReach = calculateEffectiveReach(target)
 
         // Gọi rõ ràng overload từ player eye -> tránh sự nhầm lẫn khi compiler chọn overload khác
-        val rayHit = raytraceEntity(effectiveReach, rotation, filter = { it == target || it.shouldBeAttacked() })?.entity
+        val rayHit: Entity? = raytraceEntity(effectiveReach, rotation, filter = { it == target || it.shouldBeAttacked() })?.entity
         val isFacingEnemy = (rayHit == target) || ModuleElytraTarget.canIgnoreKillAuraRotations
 
 
