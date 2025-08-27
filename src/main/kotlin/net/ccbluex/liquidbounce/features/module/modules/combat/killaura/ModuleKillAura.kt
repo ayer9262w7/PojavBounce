@@ -250,11 +250,11 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
         // Gọi rõ ràng overload từ player eye -> tránh sự nhầm lẫn khi compiler chọn overload khác
         val isFacingEnemy = facingEnemy(
-            fromEntity = player,
-            toEntity = target,
-            rotation = rotation,
-            range = effectiveReach,
-            wallsRange = wallRange.toDouble()
+            player,
+            target,
+            rotation,
+            effectiveReach,
+            wallRange.toDouble()
         ) || ModuleElytraTarget.canIgnoreKillAuraRotations
 
         ModuleDebug.debugParameter(ModuleKillAura, "Is Facing Enemy", isFacingEnemy)
