@@ -1,21 +1,3 @@
-/*
- * This file is part of LiquidBounce (https://github.com/CCBlueX/LiquidBounce)
- *
- * Copyright (c) 2015 - 2025 CCBlueX
- *
- * LiquidBounce is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * LiquidBounce is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with LiquidBounce. If not, see <https://www.gnu.org/licenses/>.
- */
 @file:Suppress("WildcardImport")
 package net.ccbluex.liquidbounce.features.module.modules.combat.killaura
 
@@ -51,7 +33,6 @@ import net.ccbluex.liquidbounce.utils.aiming.data.Rotation
 import net.ccbluex.liquidbounce.utils.aiming.data.RotationWithVector
 import net.ccbluex.liquidbounce.utils.aiming.point.PointTracker
 import net.ccbluex.liquidbounce.utils.aiming.preference.LeastDifferencePreference
-import net.ccbluex.liquidbounce.utils.aiming.utils.facingEnemy
 import net.ccbluex.liquidbounce.utils.aiming.utils.raytraceBox
 import net.ccbluex.liquidbounce.utils.aiming.utils.raytraceEntity
 import net.ccbluex.liquidbounce.utils.combat.CombatManager
@@ -254,9 +235,9 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         val actualReach = range.toDouble()
         val effectiveReach = calculateEffectiveReach(target)
 
-        val isFacingEnemy = facingEnemy(toEntity = target, rotation = rotation,
-            range = effectiveReach, // SỬ DỤNG TẦM ĐÁNH HIỆU QUẢ
-            wallsRange = wallRange.toDouble()) || ModuleElytraTarget.canIgnoreKillAuraRotations
+        // CHỈNH: sử dụng lời gọi positional (không dùng named-args) để tránh mismatch khi hàm ở Java/Kotlin có signature khác.
+        val isFacingEnemy = facingEnemy(target, rotation, effectiveReach, wallRange.toDouble())
+            || ModuleElytraTarget.canIgnoreKillAuraRotations
 
         ModuleDebug.debugParameter(ModuleKillAura, "Is Facing Enemy", isFacingEnemy)
         ModuleDebug.debugParameter(ModuleKillAura, "Rotation", rotation)
@@ -350,11 +331,11 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             else -> true
         }
 
-        val actualReach = range.toDouble()
+        val actualReachVal = range.toDouble()
         return if (shouldUsePrediction) {
-            actualReach + adjustedPredictedDistance
+            actualReachVal + adjustedPredictedDistance
         } else {
-            actualReach
+            actualReachVal
         }
     }
 

@@ -2,7 +2,6 @@ package net.ccbluex.liquidbounce.features.module.modules.combat.killaura
 
 import net.minecraft.entity.Entity
 import net.minecraft.util.math.Vec3d
-import net.minecraft.util.math.Vec3f
 import kotlin.math.*
 
 /**
@@ -43,6 +42,7 @@ object MovementAnalyzer {
         if (posHistory.size >= MOVEMENT_HISTORY_SIZE) posHistory.removeFirst()
         
         // Thêm dữ liệu mới
+        // NOTE: sử dụng entity.velocity và entity.pos như trong code gốc của bạn; nếu API khác, đổi tương ứng.
         velHistory.addLast(entity.velocity)
         posHistory.addLast(entity.pos)
         entityUpdateTimes[entityId] = currentTime
@@ -272,8 +272,8 @@ object MovementAnalyzer {
         val avgDirectionChange = if (directionChanges.isNotEmpty()) directionChanges.average() else 0.0
         
         // Kết hợp các yếu tố để tính điểm tin cậy
-        val velocityStability = exp(-velocityVariance / 5.0) // Ổn định vận tốc
-        val directionStability = exp(-avgDirectionChange / 0.5) // Ổn định hướng
+        val velocityStability = kotlin.math.exp(-velocityVariance / 5.0) // Ổn định vận tốc
+        val directionStability = kotlin.math.exp(-avgDirectionChange / 0.5) // Ổn định hướng
         val dataAmount = min(1.0, velHistory.size.toDouble() / MOVEMENT_HISTORY_SIZE) // Độ đầy đủ dữ liệu
         
         return (velocityStability * 0.4 + directionStability * 0.4 + dataAmount * 0.2).coerceIn(0.0, 1.0)

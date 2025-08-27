@@ -63,7 +63,8 @@ object NetworkMonitor {
         val n = pingHistory.size
         if (n < 2) return 0.0
         val mean = getSmoothedPing()
-        val variance = pingHistory.sumOf { (it - mean) * (it - mean) } / n
+        // note: pingHistory contains Long, mean is Double -> use map to double for variance
+        val variance = pingHistory.map { (it.toDouble() - mean) * (it.toDouble() - mean) }.average()
         return sqrt(variance)
     }
 
@@ -91,7 +92,10 @@ object NetworkMonitor {
             sumX2 += x * x
         }
 
-        val m = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX)
+        val denominator = (n * sumX2 - sumX * sumX)
+        if (kotlin.math.abs(denominator) < 1e-9) return getSmoothedPing()
+
+        val m = (n * sumXY - sumX * sumY) / denominator
         val b = (sumY - m * sumX) / n
         
         return m * (n + 1) + b
@@ -131,7 +135,7 @@ object NetworkMonitor {
     /**
      * Hàm chính mà KillAura sẽ gọi.
      * Nó áp dụng tất cả các lớp logic để đưa ra giá trị ping tối ưu nhất cho việc dự đoán.
-     * @return Giá trị ping cuối cùng để sử dụng.
+     * @return Giá trị ping cuối cùng để sử dụng (mili giây).
      */
     fun getFinalPingDecision(): Double {
         // 1. Kiểm tra các quy tắc "Ngắt Mạch" ưu tiên cao nhất
