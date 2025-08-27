@@ -1,3 +1,5 @@
+package net.ccbluex.liquidbounce.features.module.modules.combat.killaura
+
 // MovementAnalyzer.kt
 // Singleton phân tích chuyển động: lưu lịch sử vị trí/ vận tốc, tính TPS, dự đoán vị trí tương lai (kinematic)
 
@@ -7,6 +9,7 @@ import net.minecraft.network.packet.s2c.play.WorldTimeUpdateS2CPacket
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedDeque
 import kotlin.math.max
+import kotlin.math.sqrt
 
 object MovementAnalyzer {
     // --- Config ---
@@ -32,7 +35,7 @@ object MovementAnalyzer {
      * Bạn nên gọi function này từ chỗ bạn theo dõi entity (ví dụ mỗi tick).
      */
     fun recordEntityState(entity: Entity) {
-        val id = entity.entityId
+        val id = entity.id
         val pos = getEntityPos(entity)
         val vel = getEntityVelocity(entity)
 
@@ -53,7 +56,7 @@ object MovementAnalyzer {
      * ticksAhead: số tick để dự đoán (1 tick = 1/20s)
      */
     fun predictFuturePosition(entity: Entity, ticksAhead: Int = PREDICTION_TICKS): Vec3d {
-        val id = entity.entityId
+        val id = entity.id
         val posHist = positionHistory[id]?.toList()
         val velHist = velocityHistory[id]?.toList()
 
@@ -88,6 +91,19 @@ object MovementAnalyzer {
      */
     fun getLatestPosition(entityId: Int): Vec3d? {
         return positionHistory[entityId]?.lastOrNull()
+    }
+
+    // --- Simple anomaly detection: nếu thay đổi vận tốc đột ngột, coi là anomalous ---
+    fun isMovementAnomalous(entity: Entity): Boolean {
+        val id = entity.id
+        val velHist = velocityHistory[id] ?: return false
+        if (velHist.size < 2) return false
+        val last = velHist.elementAt(velHist.size - 1)
+        val prev = velHist.elementAt(velHist.size - 2)
+        val lastMag = sqrt(last.x * last.x + last.y * last.y + last.z * last.z)
+        val prevMag = sqrt(prev.x * prev.x + prev.y * prev.y + prev.z * prev.z)
+        // bất thường nếu đổi vận tốc > 1.5 blocks/tick (rất dữ dội)
+        return kotlin.math.abs(lastMag - prevMag) > 1.5
     }
 
     // --- Internal / helper utils ---

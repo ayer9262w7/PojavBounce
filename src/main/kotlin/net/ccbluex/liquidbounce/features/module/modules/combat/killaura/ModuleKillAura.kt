@@ -54,6 +54,7 @@ import net.minecraft.entity.LivingEntity
 import kotlin.math.pow
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 
 @Suppress("MagicNumber")
 object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
@@ -333,29 +334,39 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             NetworkMonitor.getSmoothedPing()
         }
 
-        // Lấy tốc độ/dự đoán movement từ MovementAnalyzer (sử dụng hàm có sẵn nếu có)
-        val predictedMovement = try {
-            MovementAnalyzer.getPredictedMovementInPingTime(player, target, pingMs.roundToLong())
-        } catch (e: Throwable) {
-            // fallback: sử dụng simple speed * time
-            val speed = MovementAnalyzer.calculateSpeedTowardsTarget(player, target)
-            speed * (pingMs / 1000.0)
+        // Chuyển ping ms -> ticks (1 tick = 50ms => *20 /1000)
+        val pingTicks = max(1, ((pingMs / 1000.0) * 20.0).roundToInt())
+
+        // Dự đoán vị trí target sau pingTicks
+        val predictedPos = try {
+            MovementAnalyzer.predictFuturePosition(target, pingTicks)
+        } catch (_: Throwable) {
+            target.pos
         }
 
-        // Lấy confidence từ MovementAnalyzer
-        val confidence = try {
-            MovementAnalyzer.getPredictionConfidence(target)
-        } catch (e: Throwable) {
-            0.5
+        // Lấy khoảng cách hiện tại và khoảng cách dự đoán
+        val currentDist = player.pos.distanceTo(target.pos)
+        val predictedDist = player.pos.distanceTo(predictedPos)
+        val predictedMovement = (predictedDist - currentDist).coerceAtLeast(0.0)
+
+        // Lấy confidence từ NetworkMonitor (accuracy của hệ thống prediction)
+        val accuracyScore = try {
+            NetworkMonitor.getPredictionAccuracyScore()
+        } catch (_: Throwable) {
+            1.0
         }
+
+        // Lấy packet loss / TPS proxy
+        val packetLoss = try { NetworkMonitor.getPacketLoss() } catch (_: Throwable) { 0.0 }
+        val serverTPS = try { MovementAnalyzer.getServerTPSValue() } catch (_: Throwable) { 20.0 }
 
         // aggression config
         val aggressionFactor = predictionAggressiveness.coerceIn(0.0f, 2.0f)
         val confidenceFactor = if (aggressionFactor <= 1.0f) {
-            confidence * aggressionFactor
+            accuracyScore * aggressionFactor
         } else {
             val extra = (aggressionFactor - 1.0f)
-            (confidence + (1.0 - confidence) * extra).coerceIn(0.0, 1.0)
+            (accuracyScore + (1.0 - accuracyScore) * extra).coerceIn(0.0, 1.0)
         }
 
         var adjustedPredictedDistance = predictedMovement * confidenceFactor
@@ -370,7 +381,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         val shouldUsePrediction = when {
             badNetwork -> false
             anomalous -> false
-            confidence < 0.25 && aggressionFactor < 1.5 -> false
+            accuracyScore < 0.25 && aggressionFactor < 1.5 -> false
             else -> true
         }
 
@@ -384,21 +395,12 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
         // Register prediction for backtest if NetworkMonitor supports it (use reflection safe)
         try {
-            val pingTicks = max(1, ((pingMs / 1000.0) * 20.0).roundToInt())
-            val predictedPos = try {
-                MovementAnalyzer.predictFuturePosition(target, pingTicks)
-            } catch (_: Throwable) {
-                // fallback to simple extrapolation using current pos
-                target.pos
-            }
-
-            // Try to find registerPrediction(EntityId, Vec3d, Int)
             val method = NetworkMonitor::class.java.methods.firstOrNull { it.name == "registerPrediction" }
             if (method != null) {
                 method.invoke(NetworkMonitor, target.id, predictedPos, pingTicks)
             }
         } catch (_: Throwable) {
-            // ignore if not supported
+            // ignore if not present
         }
 
         return actualReachVal + finalExtra

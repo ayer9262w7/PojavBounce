@@ -1,11 +1,12 @@
+package net.ccbluex.liquidbounce.features.module.modules.combat.killaura
+
 // NetworkMonitor.kt
 // Ghi nhận ping samples; ước lượng ping dự đoán (EMA), đo packet loss cơ bản (keepalive), và hệ thống pending-predictions
-// NetworkMonitor không cố gắng "bypass anti-cheat" — chỉ giúp đánh giá chất lượng dự đoán.
 
 import net.minecraft.util.math.Vec3d
 import java.util.ArrayDeque
-import kotlin.math.roundToInt
 import kotlin.math.max
+import kotlin.math.sqrt
 
 object NetworkMonitor {
     // --- Ping history (ms) ---
@@ -134,6 +135,27 @@ object NetworkMonitor {
                 ema = alpha * p + (1 - alpha) * ema
             }
             return ema
+        }
+    }
+
+    /**
+     * Alias / compatibility helpers (ModuleKillAura gọi các tên này trước đây).
+     */
+    fun getSmoothedPing(): Double = getPredictedPingMs()
+    fun getFinalPingDecision(): Double = getPredictedPingMs()
+
+    /**
+     * Jitter estimate (standard deviation of ping samples).
+     */
+    fun getJitter(): Double {
+        synchronized(pingHistory) {
+            if (pingHistory.size < 2) return 0.0
+            val mean = pingHistory.average()
+            val variance = pingHistory.fold(0.0) { acc, v ->
+                val d = v - mean
+                acc + d * d
+            } / pingHistory.size.toDouble()
+            return sqrt(variance)
         }
     }
 }
