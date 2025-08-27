@@ -205,9 +205,9 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         } else {
             val crosshairTarget = when {
                 raycast != TRACE_NONE -> {
-                    val rayHit: Entity? = raytraceEntity(player, range.toDouble(), rotation, filter = {
+                    val rayHit: Entity? = raytraceEntity(player.eyePos, range.toDouble(), rotation, filter = {
                         when (raycast) {
-                            TRACE_ONLYENEMY -> it.shouldBeAttacked()
+                            TRACE_ONLYENEMY -> CombatManager.shouldBeAttacked(it)
                             TRACE_ALL -> true
                             else -> false
                         }
@@ -217,7 +217,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                 else -> target
             }
 
-            if (crosshairTarget is LivingEntity && crosshairTarget.shouldBeAttacked() && crosshairTarget != target) {
+            if (crosshairTarget is LivingEntity && CombatManager.shouldBeAttacked(crosshairTarget) && crosshairTarget != target) {
                 targetTracker.target = crosshairTarget
             }
 
@@ -250,7 +250,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         val effectiveReach = calculateEffectiveReach(target)
 
         // Gọi rõ ràng overload từ player eye -> tránh sự nhầm lẫn khi compiler chọn overload khác
-        val rayHit: Entity? = raytraceEntity(player, effectiveReach, rotation, filter = { it == target || it.shouldBeAttacked() })?.entity
+        val rayHit: Entity? = raytraceEntity(player.eyePos, effectiveReach, rotation, filter = { it == target || CombatManager.shouldBeAttacked(it) })?.entity
         val isFacingEnemy = (rayHit == target) || ModuleElytraTarget.canIgnoreKillAuraRotations
 
 
@@ -286,7 +286,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                     return@attack false
                 }
 
-                target.attack(true, keepSprint && !shouldBlockSprinting)
+                target.attack(keepSprint && !shouldBlockSprinting)
 
                 if (samePlayer && target is LivingEntity) {
                     targetTracker.stickyTarget = target
