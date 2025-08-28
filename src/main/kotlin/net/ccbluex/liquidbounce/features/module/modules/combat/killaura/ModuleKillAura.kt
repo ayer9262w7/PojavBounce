@@ -20,6 +20,7 @@
 package net.ccbluex.liquidbounce.features.module.modules.combat.killaura
 
 import com.google.gson.JsonObject
+import kotlinx.coroutines.launch
 import net.ccbluex.liquidbounce.config.types.NamedChoice
 import net.ccbluex.liquidbounce.event.Sequence
 import net.ccbluex.liquidbounce.event.events.RotationUpdateEvent
@@ -454,20 +455,13 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                     return@attack false
                 }
 
-                // Sử dụng vị trí dự đoán từ AI nếu có
-                val finalRotation = if (predictedPos != null && learningEnabled) {
-                    Rotation.lookingAt(predictedPos, player.eyePos)
-                } else {
-                    rotation
-                }
-                
-                RotationManager.setRotation(finalRotation)
-
                 val success = target.attack(true, keepSprint && !shouldBlockSprinting)
 
-                // AI học từ kết quả
+                // AI học từ kết quả (gọi trong coroutine)
                 if (learningEnabled) {
-                    KillAuraLearningSystem.learnFromResult(target, success)
+                    launch {
+                        KillAuraLearningSystem.learnFromResult(target, success)
+                    }
                 }
 
                 if (samePlayer && target is LivingEntity) {
