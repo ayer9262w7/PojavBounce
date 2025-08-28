@@ -247,20 +247,16 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     val clickScheduler = tree(KillAuraClicker)
     
     internal val range by float("Range", 4.2f, 1f..8f)
-    internal val wallRange by float("WallRange", 3f, 0f..8f).onChange { wallRange ->
-        if (wallRange > range) {
-            // onChange expects Unit; avoid returning value here.
-            // If you want to clamp the property value, do it elsewhere (UI/delegate).
-        } else {
-            // no-op
-        }
+    internal val wallRange by float("WallRange", 3f, 0f..8f).onChange { newValue ->
+        // Return a Float (the possibly-clamped value). onChange expects to return the effective value.
+        if (newValue > range) range else newValue
     }
 
     val samePlayer by boolean("SamePlayer", false)
     private val samePlayerDuration by int("SamePlayerDuration", 5, 1..120, "s")
 
-    private val scanExtraRange by floatRange("ScanExtraRange", 2.0f..3.0f, 0.0f..7.0f).onChanged { range ->
-        currentScanExtraRange = range.random()
+    private val scanExtraRange by floatRange("ScanExtraRange", 2.0f..3.0f, 0.0f..7.0f).onChanged { r ->
+        currentScanExtraRange = r.random()
     }
     private var currentScanExtraRange: Float = scanExtraRange.random()
 
@@ -295,7 +291,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         KillAuraAutoBlock.stopBlocking()
         KillAuraNotifyWhenFail.failedHitsIncrement = 0
         targetTracker.stickyTarget = null
-        // cancel coroutine scope properly
         aiScope.cancel()
     }
 
