@@ -1,3 +1,21 @@
+/*
+ * This file is part of LiquidBounce (https://github.com/CCBlueX/LiquidBounce)
+ *
+ * Copyright (c) 2015 - 2025 CCBlueX
+ *
+ * LiquidBounce is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * LiquidBounce is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with LiquidBounce. If not, see <https://www.gnu.org/licenses/>.
+ */
 @file:Suppress("WildcardImport")
 package net.ccbluex.liquidbounce.features.module.modules.combat.killaura
 
@@ -52,15 +70,12 @@ import net.minecraft.client.util.math.MatrixStack
 import net.minecraft.entity.Entity
 import net.minecraft.entity.LivingEntity
 import kotlin.math.pow
-import kotlin.math.max
-import kotlin.math.roundToInt
-import kotlin.math.roundToLong
 
 @Suppress("MagicNumber")
 object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
     val clickScheduler = tree(KillAuraClicker)
-
+    
     internal val range by float("Range", 4.2f, 1f..8f)
     internal val wallRange by float("WallRange", 3f, 0f..8f).onChange { wallRange ->
         if (wallRange > range) {
@@ -70,8 +85,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
     }
 
-    // --- THÊM CẤU HÌNH MỚI ---
-    val predictionAggressiveness by float("PredictionAggressiveness", 1.0f, 0.0f..2.0f)
     val samePlayer by boolean("SamePlayer", false)
     private val samePlayerDuration by int("SamePlayerDuration", 5, 1..120, "s")
 
@@ -177,56 +190,43 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             return@tickHandler
         }
 
-        // --- CẬP NHẬT: GHI LẠI TRẠNG THÁI MỤC TIÊU CHO PHÂN TÍCH ---
-        MovementAnalyzer.recordEntityState(target)
-        MovementAnalyzer.recordEntityState(player)
-
-        // === MỚI: feed NetworkMonitor ping sample (nếu có latency available) ===
-        try {
-            // API lấy player list entry có thể khác tuỳ phiên bản; giữ try/catch để an toàn.
-            val handler = mc.networkHandler
-            val entry = handler?.getPlayerListEntry(player.uuid)
-            if (entry != null) {
-                NetworkMonitor.recordPing(entry.latency.toLong())
-            }
-        } catch (_: Throwable) {
-            // ignore nếu API khác
-        }
-        // =======================================================================
-
         val rotation = (if (rotations.rotationTiming == ON_TICK) {
             getSpot(target, range.toDouble(), PointTracker.AimSituation.FOR_NOW)?.rotation
         } else {
             null
         } ?: RotationManager.currentRotation ?: player.rotation).normalize()
 
+        // ===== BẮT ĐẦU ĐOẠN CODE CẢI TIẾN =====
         val finalTarget = if (samePlayer && targetTracker.stickyTarget != null) {
+            // Nếu SamePlayer đang bật và có mục tiêu ghim, luôn dùng mục tiêu đó làm mục tiêu cuối cùng.
             targetTracker.stickyTarget
         } else {
+            // Nếu không, mới thực hiện logic raycast và tìm mục tiêu dưới con trỏ chuột như cũ.
             val crosshairTarget = when {
                 raycast != TRACE_NONE -> {
-                    val rayHit: Entity? = raytraceEntity(player.eyePos, range.toDouble(), rotation, filter = {
+                    raytraceEntity(range.toDouble(), rotation, filter = {
                         when (raycast) {
-                            TRACE_ONLYENEMY -> CombatManager.shouldBeAttacked(it)
+                            TRACE_ONLYENEMY -> it.shouldBeAttacked()
                             TRACE_ALL -> true
                             else -> false
                         }
-                    })?.entity
-                    rayHit ?: target
+                    })?.entity ?: target
                 }
                 else -> target
             }
 
-            if (crosshairTarget is LivingEntity && CombatManager.shouldBeAttacked(crosshairTarget) && crosshairTarget != target) {
+            if (crosshairTarget is LivingEntity && crosshairTarget.shouldBeAttacked() && crosshairTarget != target) {
                 targetTracker.target = crosshairTarget
             }
-
-            crosshairTarget
+            
+            crosshairTarget // Mục tiêu cuối cùng trong trường hợp này là kết quả của raycast.
         }
 
+        // Chỉ thực hiện tấn công nếu có một mục tiêu hợp lệ cuối cùng.
         if (finalTarget != null) {
             attackTarget(this, finalTarget, rotation)
         }
+        // ===== KẾT THÚC ĐOẠN CODE CẢI TIẾN =====
     }
 
     val shouldBlockSprinting
@@ -245,19 +245,13 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     private suspend fun attackTarget(sequence: Sequence, target: Entity, rotation: Rotation) {
         KillAuraAutoBlock.makeSeemBlock()
 
-        // --- TÍNH TOÁN TẦM ĐÁNH HIỆU QUẢ VỚI DỰ ĐOÁN ---
-        val actualReach = range.toDouble()
-        val effectiveReach = calculateEffectiveReach(target)
-
-        // Gọi rõ ràng overload từ player eye -> tránh sự nhầm lẫn khi compiler chọn overload khác
-        val rayHit: Entity? = raytraceEntity(player.eyePos, effectiveReach, rotation, filter = { it == target || CombatManager.shouldBeAttacked(it) })?.entity
-        val isFacingEnemy = (rayHit == target) || ModuleElytraTarget.canIgnoreKillAuraRotations
-
+        val isFacingEnemy = facingEnemy(toEntity = target, rotation = rotation,
+            range = range.toDouble(),
+            wallsRange = wallRange.toDouble()) || ModuleElytraTarget.canIgnoreKillAuraRotations
 
         ModuleDebug.debugParameter(ModuleKillAura, "Is Facing Enemy", isFacingEnemy)
         ModuleDebug.debugParameter(ModuleKillAura, "Rotation", rotation)
         ModuleDebug.debugParameter(ModuleKillAura, "Target", target.nameForScoreboard)
-        ModuleDebug.debugParameter(ModuleKillAura, "Effective Reach", effectiveReach)
 
         if (!isFacingEnemy) {
             if (KillAuraAutoBlock.enabled && KillAuraAutoBlock.onScanRange &&
@@ -286,7 +280,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                     return@attack false
                 }
 
-                target.attack(keepSprint && !shouldBlockSprinting)
+                target.attack(true, keepSprint && !shouldBlockSprinting)
 
                 if (samePlayer && target is LivingEntity) {
                     targetTracker.stickyTarget = target
@@ -299,7 +293,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                 GenericDebugRecorder.recordDebugInfo(ModuleKillAura, "attackEntity", JsonObject().apply {
                     add("player", GenericDebugRecorder.debugObject(player))
                     add("targetPos", GenericDebugRecorder.debugObject(target))
-                    add("effectiveReach", GenericDebugRecorder.debugObject(effectiveReach))
                 })
 
                 true
@@ -312,97 +305,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
     }
 
-    /**
-     * HÀM ĐÃ VÁ (thay thế DUY NHẤT so với file gốc):
-     * Tính toán tầm đánh hiệu quả với dự đoán chuyển động — giữ logic gốc nhưng thêm:
-     * - clamp maximum extra reach,
-     * - jitter humanize,
-     * - ngắt mạch khi mạng kém / chuyển động bất thường,
-     * - đăng ký prediction để NetworkMonitor có thể backtest (nếu method tồn tại).
-     */
-    private fun calculateEffectiveReach(target: Entity): Double {
-        val actualReachVal = range.toDouble()
-
-        // Lấy final ping quyết định từ NetworkMonitor (ms)
-        val pingMs = try {
-            NetworkMonitor.getFinalPingDecision()
-        } catch (e: Throwable) {
-            // fallback an toàn
-            NetworkMonitor.getSmoothedPing()
-        }
-
-        // Chuyển ping ms -> ticks (1 tick = 50ms => *20 /1000)
-        val pingTicks = max(1, ((pingMs / 1000.0) * 20.0).roundToInt())
-
-        // Dự đoán vị trí target sau pingTicks
-        val predictedPos = try {
-            MovementAnalyzer.predictFuturePosition(target, pingTicks)
-        } catch (_: Throwable) {
-            target.pos
-        }
-
-        // Lấy khoảng cách hiện tại và khoảng cách dự đoán
-        val currentDist = player.pos.distanceTo(target.pos)
-        val predictedDist = player.pos.distanceTo(predictedPos)
-        val predictedMovement = (predictedDist - currentDist).coerceAtLeast(0.0)
-
-        // Lấy confidence từ NetworkMonitor (accuracy của hệ thống prediction)
-        val accuracyScore = try {
-            NetworkMonitor.getPredictionAccuracyScore()
-        } catch (_: Throwable) {
-            1.0
-        }
-
-        // Lấy packet loss / TPS proxy
-        val packetLoss = try { NetworkMonitor.getPacketLoss() } catch (_: Throwable) { 0.0 }
-        val serverTPS = try { MovementAnalyzer.getServerTPSValue() } catch (_: Throwable) { 20.0 }
-
-        // aggression config
-        val aggressionFactor = predictionAggressiveness.coerceIn(0.0f, 2.0f)
-        val confidenceFactor = if (aggressionFactor <= 1.0f) {
-            accuracyScore * aggressionFactor
-        } else {
-            val extra = (aggressionFactor - 1.0f)
-            (accuracyScore + (1.0 - accuracyScore) * extra).coerceIn(0.0, 1.0)
-        }
-
-        var adjustedPredictedDistance = predictedMovement * confidenceFactor
-
-        // safety checks: network / anomaly
-        val jitter = try { NetworkMonitor.getJitter() } catch (_: Throwable) { 0.0 }
-        val smoothedPing = try { NetworkMonitor.getSmoothedPing() } catch (_: Throwable) { 50.0 }
-
-        val badNetwork = (jitter > 50.0) || (smoothedPing > 400.0)
-        val anomalous = try { MovementAnalyzer.isMovementAnomalous(target) } catch (_: Throwable) { false }
-
-        val shouldUsePrediction = when {
-            badNetwork -> false
-            anomalous -> false
-            accuracyScore < 0.25 && aggressionFactor < 1.5 -> false
-            else -> true
-        }
-
-        // clamp extra reach
-        val maxExtra = max(0.4, currentScanExtraRange.toDouble()) // at least 0.4 blocks, else use scanExtraRange
-        val extra = if (shouldUsePrediction) adjustedPredictedDistance.coerceAtMost(maxExtra) else 0.0
-
-        // humanize small jitter
-        val humanJitter = (Math.random() - 0.5) * 0.06 // ±0.03 blocks
-        val finalExtra = (extra + humanJitter).coerceIn(0.0, maxExtra)
-
-        // Register prediction for backtest if NetworkMonitor supports it (use reflection safe)
-        try {
-            val method = NetworkMonitor::class.java.methods.firstOrNull { it.name == "registerPrediction" }
-            if (method != null) {
-                method.invoke(NetworkMonitor, target.id, predictedPos, pingTicks)
-            }
-        } catch (_: Throwable) {
-            // ignore if not present
-        }
-
-        return actualReachVal + finalExtra
-    }
-
     private fun updateTarget() {
         val situation = when {
             clickScheduler.isClickTick || clickScheduler.willClickAt(1)
@@ -410,7 +312,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             else -> PointTracker.AimSituation.FOR_THE_FUTURE
         }
         ModuleDebug.debugParameter(ModuleKillAura, "AimSituation", situation)
-
+        
         if (samePlayer) {
             val sticky = targetTracker.stickyTarget
             if (sticky != null) {
@@ -429,7 +331,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                 }
             }
         }
-
+        
         val maximumRange = if (targetTracker.closestSquaredEnemyDistance > range.pow(2)) {
             range + currentScanExtraRange
         } else {
@@ -464,6 +366,11 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
     }
 
+    /**
+     * HÀM MỚI ĐƯỢC THÊM VÀO ĐỂ SỬA LỖI XOAY GÓC
+     * Tính toán đường đi góc quay ngắn nhất từ góc hiện tại đến góc mục tiêu.
+     * Nó xử lý vấn đề "xoay vòng" khi đi qua ranh giới -180/180 độ.
+     */
     private fun getShortestAngle(currentYaw: Float, targetYaw: Float): Float {
         var delta = (targetYaw - currentYaw) % 360.0f
         if (delta >= 180.0f) {
@@ -474,45 +381,50 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
         return currentYaw + delta
     }
+    
+@Suppress("ReturnCount")
+private fun processTarget(
+    entity: LivingEntity,
+    maximumRange: Float,
+    situation: PointTracker.AimSituation
+): Boolean {
+    val (rotation, _) = getSpot(entity, maximumRange.toDouble(), situation) ?: return false
+    val ticks = rotations.calculateTicks(rotation)
+    ModuleDebug.debugParameter(ModuleKillAura, "Rotation Ticks", ticks)
 
-    @Suppress("ReturnCount")
-    private fun processTarget(
-        entity: LivingEntity,
-        maximumRange: Float,
-        situation: PointTracker.AimSituation
-    ): Boolean {
-        val (rotation, _) = getSpot(entity, maximumRange.toDouble(), situation) ?: return false
-        val ticks = rotations.calculateTicks(rotation)
-        ModuleDebug.debugParameter(ModuleKillAura, "Rotation Ticks", ticks)
-
-        val currentYaw = RotationManager.serverRotation.yaw
+    // Chỉ áp dụng hiệu chỉnh góc ngắn nhất khi chưa hướng vào mục tiêu
+    val currentYaw = RotationManager.serverRotation.yaw
+    val correctedRotation = if (abs(currentYaw - rotation.yaw) > 180) {
         val shortestYaw = getShortestAngle(currentYaw, rotation.yaw)
-        val correctedRotation = Rotation(shortestYaw, rotation.pitch)
-
-        when (rotations.rotationTiming) {
-            SNAP -> if (!clickScheduler.willClickAt(ticks.coerceAtLeast(1))) {
-                return true
-            }
-            ON_TICK -> if (ticks <= 1) {
-                return true
-            }
-            else -> {
-            }
-        }
-
-        RotationManager.setRotationTarget(
-            rotations.toRotationTarget(
-                correctedRotation,
-                entity,
-                considerInventory = !ignoreOpenInventory
-            ),
-            priority = Priority.IMPORTANT_FOR_USAGE_2,
-            provider = this@ModuleKillAura
-        )
-
-        return true
+        Rotation(shortestYaw, rotation.pitch)
+    } else {
+        rotation
     }
 
+    when (rotations.rotationTiming) {
+        SNAP -> if (!clickScheduler.willClickAt(ticks.coerceAtLeast(1))) {
+            return true
+        }
+        ON_TICK -> if (ticks <= 1) {
+            return true
+        }
+        else -> {
+        }
+    }
+
+    RotationManager.setRotationTarget(
+        rotations.toRotationTarget(
+            correctedRotation,
+            entity,
+            considerInventory = !ignoreOpenInventory
+        ),
+        priority = Priority.IMPORTANT_FOR_USAGE_2,
+        provider = this@ModuleKillAura
+    )
+
+    return true
+}
+    
     private fun getSpot(entity: LivingEntity, range: Double,
                         situation: PointTracker.AimSituation): RotationWithVector? {
         val point = pointTracker.gatherPoint(
