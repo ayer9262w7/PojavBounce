@@ -248,7 +248,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     
     internal val range by float("Range", 4.2f, 1f..8f)
     internal val wallRange by float("WallRange", 3f, 0f..8f).onChange { newValue ->
-        // Return a Float (the possibly-clamped value). onChange expects to return the effective value.
+        // onChange expected to return the effective Float value; clamp to range if needed.
         if (newValue > range) range else newValue
     }
 
@@ -291,6 +291,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         KillAuraAutoBlock.stopBlocking()
         KillAuraNotifyWhenFail.failedHitsIncrement = 0
         targetTracker.stickyTarget = null
+        // cancel coroutine scope properly
         aiScope.cancel()
     }
 
@@ -348,11 +349,12 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
 
         if (target == null) {
-            val hasUnblocked = KillAuraAutoBlock.stopBlocking()
+            // stop blocking (don't depend on its return value, treat stopBlocking as side-effect)
+            KillAuraAutoBlock.stopBlocking()
 
             if (KillAuraFailSwing.enabled && requirementsMet) {
-                if (hasUnblocked) {
-                    // tickHandler receiver is Sequence, call waitTicks on it
+                // If there is a tick off scheduled, wait that many ticks before fake swing
+                if (KillAuraAutoBlock.currentTickOff > 0) {
                     this.waitTicks(KillAuraAutoBlock.currentTickOff)
                 }
                 dealWithFakeSwing(this, null)
@@ -453,13 +455,14 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                 return
             }
 
-            val hasUnblocked = KillAuraAutoBlock.stopBlocking()
+            // stop blocking as a side-effect (don't rely on return value)
+            KillAuraAutoBlock.stopBlocking()
 
             if (KillAuraFailSwing.enabled) {
-                if (hasUnblocked) {
+                // If currentTickOff indicates a tick off period, wait that many ticks
+                if (KillAuraAutoBlock.currentTickOff > 0) {
                     sequence.waitTicks(KillAuraAutoBlock.currentTickOff)
                 }
-
                 dealWithFakeSwing(sequence, target)
             }
             return
@@ -473,7 +476,9 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                     return@attack false
                 }
 
-                val success = target.attack(true, keepSprint && !shouldBlockSprinting)
+                // Entity.attack in this repo returns Unit; do the attack and assume success if reached here.
+                target.attack(true, keepSprint && !shouldBlockSprinting)
+                val success = true
 
                 // AI học từ kết quả (gọi trong coroutine)
                 if (learningEnabled && success) {
