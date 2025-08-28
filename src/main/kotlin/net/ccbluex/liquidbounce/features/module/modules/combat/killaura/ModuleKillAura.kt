@@ -69,11 +69,174 @@ import net.minecraft.client.gui.screen.ingame.GenericContainerScreen
 import net.minecraft.client.util.math.MatrixStack
 import net.minecraft.entity.Entity
 import net.minecraft.entity.LivingEntity
+import net.minecraft.entity.player.PlayerEntity
+import net.minecraft.util.math.Vec3d
 import kotlin.math.abs
 import kotlin.math.pow
+import kotlin.math.acos
 
 @Suppress("MagicNumber")
 object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
+
+    // ===== AI ENHANCEMENTS =====
+    data class CombatAIContext(
+        val playerHealth: Float,
+        val playerArmor: Float,
+        val nearbyEnemies: List<LivingEntity>,
+        val networkLatency: Long
+    )
+
+    data class MovementSnapshot(
+        val pos: Vec3d,
+        val velocity: Vec3d,
+        val timestamp: Long
+    )
+
+    data class BehaviorProfile(
+        val aggressiveness: Float,
+        val movementStyle: MovementStyle,
+        val preferredRange: Float
+    ) {
+        companion object {
+            val DEFAULT = BehaviorProfile(0.5f, MovementStyle.NORMAL, 4.0f)
+        }
+    }
+
+    enum class MovementStyle {
+        NORMAL, AGGRESSIVE, DEFENSIVE, CIRCLE_STRAFE
+    }
+
+    class MovementHistoryTracker {
+        private val entityHistory = mutableMapOf<String, MutableList<MovementSnapshot>>()
+        private val maxHistorySize = 15
+
+        fun updateEntityHistory(entity: LivingEntity) {
+            val uuid = entity.uuidAsString
+            val snapshot = MovementSnapshot(
+                pos = entity.pos,
+                velocity = entity.velocity,
+                timestamp = System.currentTimeMillis()
+            )
+            entityHistory.computeIfAbsent(uuid) { mutableListOf() }.apply {
+                add(snapshot)
+                if (size > maxHistorySize) removeAt(0)
+            }
+        }
+        fun getHistory(uuid: String): List<MovementSnapshot> = entityHistory[uuid] ?: emptyList()
+    }
+
+    object KillAuraLearningSystem {
+        private val successRateByBehavior = mutableMapOf<Int, Pair<Int, Int>>()
+
+        suspend fun learnFromResult(target: Entity, success: Boolean) {
+            if (target !is PlayerEntity) return
+            val profile = analyzePlayerBehavior(target)
+            val profileHash = profile.hashCode()
+            val (currentSuccesses, currentAttempts) = successRateByBehavior.getOrDefault(profileHash, Pair(0, 0))
+            val newSuccesses = if (success) currentSuccesses + 1 else currentSuccesses
+            val newAttempts = currentAttempts + 1
+            successRateByBehavior[profileHash] = Pair(newSuccesses, newAttempts)
+        }
+
+        suspend fun analyzePlayerBehavior(player: PlayerEntity): BehaviorProfile {
+            val history = movementTracker.getHistory(player.uuidAsString)
+            if (history.size < 5) return BehaviorProfile.DEFAULT
+            
+            val avgDistance = history.map { it.pos.distanceTo(ModuleKillAura.player.pos) }.average()
+            val turningRate = calculateTurningRate(history.map { it.pos })
+            val closingRate = (history.first().pos.distanceTo(ModuleKillAura.player.pos) - history.last().pos.distanceTo(ModuleKillAura.player.pos)) / history.size
+
+            val movementStyle = when {
+                turningRate > 0.4f && avgDistance < 4.0 -> MovementStyle.CIRCLE_STRAFE
+                closingRate > 0.1 -> MovementStyle.AGGRESSIVE
+                closingRate < -0.1 -> MovementStyle.DEFENSIVE
+                else -> MovementStyle.NORMAL
+            }
+            
+            return BehaviorProfile(
+                aggressiveness = (closingRate * 5).toFloat().coerceIn(0.0f, 1.0f),
+                movementStyle = movementStyle,
+                preferredRange = avgDistance.toFloat()
+            )
+        }
+
+        suspend fun calculateAdaptiveThreatScore(enemy: LivingEntity, baseScore: Float): Float {
+            if (enemy !is PlayerEntity) return baseScore
+            val profile = analyzePlayerBehavior(enemy)
+            val profileHash = profile.hashCode()
+            val (successes, attempts) = successRateByBehavior.getOrDefault(profileHash, Pair(0, 5))
+            if (attempts < 3) return baseScore
+            
+            val successRate = successes.toFloat() / attempts.toFloat()
+            val bonus = (0.5f - successRate) * 0.3f
+            return baseScore + bonus
+        }
+
+        private fun calculateTurningRate(positions: List<Vec3d>): Float {
+            if (positions.size < 3) return 0f
+            val angles = mutableListOf<Double>()
+            for (i in 2 until positions.size) {
+                val v1 = positions[i - 1].subtract(positions[i - 2])
+                val v2 = positions[i].subtract(positions[i - 1])
+                if (v1.length() > 0.01 && v2.length() > 0.01) {
+                    val cosAngle = v1.normalize().dotProduct(v2.normalize())
+                    angles.add(acos(cosAngle.coerceIn(-1.0, 1.0)))
+                }
+            }
+            return if (angles.isNotEmpty()) (angles.average() / Math.PI).toFloat() else 0f
+        }
+    }
+
+    object KillAuraAIPredictor {
+        suspend fun getOptimalTarget(context: CombatAIContext): LivingEntity? {
+            if (context.nearbyEnemies.isEmpty()) return null
+            
+            val targetScores = context.nearbyEnemies.map { enemy ->
+                val baseScore = calculateBaseThreatScore(enemy)
+                val adaptiveScore = KillAuraLearningSystem.calculateAdaptiveThreatScore(enemy, baseScore)
+                enemy to adaptiveScore
+            }.sortedByDescending { it.second }
+
+            return targetScores.firstOrNull()?.first
+        }
+
+        private fun calculateBaseThreatScore(enemy: LivingEntity): Float {
+            val distance = ModuleKillAura.player.distanceTo(enemy)
+            val distanceScore = (8f - distance.coerceIn(0f, 8f)) / 8f * 0.4f
+            val healthScore = (1f - (enemy.health / enemy.maxHealth)) * 0.3f
+            val armorScore = (20f - enemy.armor) / 20f * 0.1f
+            val isApproaching = isEntityApproaching(enemy)
+            val behaviorScore = if (isApproaching) 0.2f else 0.0f
+            return distanceScore + healthScore + armorScore + behaviorScore
+        }
+
+        suspend fun predictTargetPosition(target: Entity, ticksAhead: Int): Vec3d {
+            val history = ModuleKillAura.movementTracker.getHistory(target.uuidAsString)
+            if (history.size < 3) {
+                return target.pos.add(target.velocity.multiply(ticksAhead.toDouble()))
+            }
+            
+            val lastMove = history.last().pos.subtract(history[history.size - 2].pos)
+            val extrapolatedPos = target.pos.add(lastMove.multiply(ticksAhead.toDouble()))
+            
+            // Simple gravity compensation
+            return if (!target.isOnGround) {
+                extrapolatedPos.add(0.0, -0.04 * ticksAhead * ticksAhead, 0.0)
+            } else {
+                extrapolatedPos
+            }
+        }
+
+        private fun isEntityApproaching(entity: Entity): Boolean {
+            val directionToPlayer = ModuleKillAura.player.pos.subtract(entity.pos).normalize()
+            val entityVelocity = entity.velocity.normalize()
+            return directionToPlayer.dotProduct(entityVelocity) > 0.5
+        }
+    }
+
+    val movementTracker = MovementHistoryTracker()
+    private val learningEnabled by boolean("LearningEnabled", true)
+    // =============================
 
     val clickScheduler = tree(KillAuraClicker)
     
@@ -168,6 +331,11 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             return@tickHandler
         }
 
+        // Cập nhật lịch sử di chuyển cho tất cả entities
+        world.entities.filterIsInstance<LivingEntity>().forEach { entity ->
+            movementTracker.updateEntityHistory(entity)
+        }
+
         val target = targetTracker.target
 
         if (CombatManager.shouldPauseCombat) {
@@ -197,6 +365,11 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             null
         } ?: RotationManager.currentRotation ?: player.rotation).normalize()
 
+        // Sử dụng AI để dự đoán vị trí và tối ưu hóa tấn công
+        val aiContext = createAIContext()
+        val aiOptimalTarget = if (learningEnabled) KillAuraAIPredictor.getOptimalTarget(aiContext) else target
+        val predictedPos = if (learningEnabled) KillAuraAIPredictor.predictTargetPosition(aiOptimalTarget ?: target, 3) else target.pos
+
         // ===== BẮT ĐẦU ĐOẠN CODE CẢI TIẾN =====
         val finalTarget = if (samePlayer && targetTracker.stickyTarget != null) {
             // Nếu SamePlayer đang bật và có mục tiêu ghim, luôn dùng mục tiêu đó làm mục tiêu cuối cùng.
@@ -225,7 +398,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
         // Chỉ thực hiện tấn công nếu có một mục tiêu hợp lệ cuối cùng.
         if (finalTarget != null) {
-            attackTarget(this, finalTarget, rotation)
+            attackTarget(this, finalTarget, rotation, predictedPos)
         }
         // ===== KẾT THÚC ĐOẠN CODE CẢI TIẾN =====
     }
@@ -242,8 +415,8 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
     }
 
-    @Suppress("CognitiveComplexMethod", "CyclomaticComplexMethod")
-    private suspend fun attackTarget(sequence: Sequence, target: Entity, rotation: Rotation) {
+    @Suppress("CognitiveComplexity", "CyclomaticComplexMethod")
+    private suspend fun attackTarget(sequence: Sequence, target: Entity, rotation: Rotation, predictedPos: Vec3d? = null) {
         KillAuraAutoBlock.makeSeemBlock()
 
         val isFacingEnemy = facingEnemy(toEntity = target, rotation = rotation,
@@ -281,7 +454,21 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                     return@attack false
                 }
 
-                target.attack(true, keepSprint && !shouldBlockSprinting)
+                // Sử dụng vị trí dự đoán từ AI nếu có
+                val finalRotation = if (predictedPos != null && learningEnabled) {
+                    Rotation.lookingAt(predictedPos, player.eyePos)
+                } else {
+                    rotation
+                }
+                
+                RotationManager.setRotation(finalRotation)
+
+                val success = target.attack(true, keepSprint && !shouldBlockSprinting)
+
+                // AI học từ kết quả
+                if (learningEnabled) {
+                    KillAuraLearningSystem.learnFromResult(target, success)
+                }
 
                 if (samePlayer && target is LivingEntity) {
                     targetTracker.stickyTarget = target
@@ -304,6 +491,15 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         } else {
             KillAuraAutoBlock.startBlocking()
         }
+    }
+
+    private fun createAIContext(): CombatAIContext {
+        return CombatAIContext(
+            playerHealth = player.health,
+            playerArmor = player.armor.toFloat(),
+            nearbyEnemies = targetTracker.targets().filterIsInstance<LivingEntity>(),
+            networkLatency = 50L // Placeholder
+        )
     }
 
     private fun updateTarget() {
@@ -372,53 +568,53 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
      * Tính toán đường đi góc quay ngắn nhất từ góc hiện tại đến góc mục tiêu.
      * Nó xử lý vấn đề "xoay vòng" khi đi qua ranh giới -180/180 độ.
      */
-private fun getShortestAngle(current: Float, target: Float): Float {
-    var delta = (target - current) % 360f
-    if (delta > 180f) delta -= 360f
-    if (delta < -180f) delta += 360f
-    return current + delta
-}
-    
-@Suppress("ReturnCount")
-private fun processTarget(
-    entity: LivingEntity,
-    maximumRange: Float,
-    situation: PointTracker.AimSituation
-): Boolean {
-    val (rotation, _) = getSpot(entity, maximumRange.toDouble(), situation) ?: return false
-    val ticks = rotations.calculateTicks(rotation)
-    ModuleDebug.debugParameter(ModuleKillAura, "Rotation Ticks", ticks)
-
-    // LUÔN áp dụng hiệu chỉnh góc ngắn nhất để xoay mượt hơn
-    val currentRotation = RotationManager.serverRotation
-    val correctedRotation = Rotation(
-        getShortestAngle(currentRotation.yaw, rotation.yaw),
-        rotation.pitch
-    )
-
-    when (rotations.rotationTiming) {
-        SNAP -> if (!clickScheduler.willClickAt(ticks.coerceAtLeast(1))) {
-            return true
-        }
-        ON_TICK -> if (ticks <= 1) {
-            return true
-        }
-        else -> {
-        }
+    private fun getShortestAngle(current: Float, target: Float): Float {
+        var delta = (target - current) % 360f
+        if (delta > 180f) delta -= 360f
+        if (delta < -180f) delta += 360f
+        return current + delta
     }
+    
+    @Suppress("ReturnCount")
+    private fun processTarget(
+        entity: LivingEntity,
+        maximumRange: Float,
+        situation: PointTracker.AimSituation
+    ): Boolean {
+        val (rotation, _) = getSpot(entity, maximumRange.toDouble(), situation) ?: return false
+        val ticks = rotations.calculateTicks(rotation)
+        ModuleDebug.debugParameter(ModuleKillAura, "Rotation Ticks", ticks)
 
-    RotationManager.setRotationTarget(
-        rotations.toRotationTarget(
-            correctedRotation,
-            entity,
-            considerInventory = !ignoreOpenInventory
-        ),
-        priority = Priority.IMPORTANT_FOR_USAGE_2,
-        provider = this@ModuleKillAura
-    )
+        // LUÔN áp dụng hiệu chỉnh góc ngắn nhất để xoay mượt hơn
+        val currentRotation = RotationManager.serverRotation
+        val correctedRotation = Rotation(
+            getShortestAngle(currentRotation.yaw, rotation.yaw),
+            rotation.pitch
+        )
 
-    return true
-}
+        when (rotations.rotationTiming) {
+            SNAP -> if (!clickScheduler.willClickAt(ticks.coerceAtLeast(1))) {
+                return true
+            }
+            ON_TICK -> if (ticks <= 1) {
+                return true
+            }
+            else -> {
+            }
+        }
+
+        RotationManager.setRotationTarget(
+            rotations.toRotationTarget(
+                correctedRotation,
+                entity,
+                considerInventory = !ignoreOpenInventory
+            ),
+            priority = Priority.IMPORTANT_FOR_USAGE_2,
+            provider = this@ModuleKillAura
+        )
+
+        return true
+    }
     
     private fun getSpot(entity: LivingEntity, range: Double,
                         situation: PointTracker.AimSituation): RotationWithVector? {
