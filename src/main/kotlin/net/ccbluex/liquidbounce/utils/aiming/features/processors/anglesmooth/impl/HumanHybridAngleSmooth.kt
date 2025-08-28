@@ -112,9 +112,14 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
 
         val distCoef = (dynamic.distanceCoef * distance).toFloat()
 
-        // randomness ranges
-        val yawRange = (-aYawBase.random() + distCoef)..(aYawBase.random() + distCoef)
-        val pitchRange = (-aPitchBase.random() + distCoef)..(aPitchBase.random() + distCoef)
+        // randomness ranges (explicitly cast random() results to Float to avoid Number/Comparable ambiguity)
+        val yawMin = -aYawBase.random().toFloat() + distCoef
+        val yawMax = aYawBase.random().toFloat() + distCoef
+        val yawRange = yawMin..yawMax
+
+        val pitchMin = -aPitchBase.random().toFloat() + distCoef
+        val pitchMax = aPitchBase.random().toFloat() + distCoef
+        val pitchRange = pitchMin..pitchMax
 
         // acceleration-like delta
         val yawAccel = RotationUtil.angleDifference(diff.deltaYaw, prevDiff.deltaYaw).coerceIn(yawRange)
