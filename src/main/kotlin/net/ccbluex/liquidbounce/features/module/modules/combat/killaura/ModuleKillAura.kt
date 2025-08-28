@@ -69,6 +69,7 @@ import net.minecraft.client.gui.screen.ingame.GenericContainerScreen
 import net.minecraft.client.util.math.MatrixStack
 import net.minecraft.entity.Entity
 import net.minecraft.entity.LivingEntity
+import kotlin.math.abs
 import kotlin.math.pow
 
 @Suppress("MagicNumber")
