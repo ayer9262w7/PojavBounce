@@ -20,11 +20,10 @@ import kotlin.math.*
 /**
  * HumanHybridAngleSmooth
  *
- * Hybrid aiming that aims to be human-like (reaction delay, micro-tremor, EMA filter,
- * spring-like smoothing blended with acceleration fallback).
+ * Sửa triệt để các điểm gây lỗi biên dịch liên quan đến ambiguity kiểu khi tạo range
+ * và bảo đảm các toán tử coerceIn / coerce sử dụng kiểu Float nhất quán.
  *
- * Không dùng motionX/motionZ/posX/... để tránh mismatch mapping,
- * chỉ dựa trên RotationDelta + entity distance (đã có trong repo).
+ * Mục tiêu: build không lỗi và hành vi feature được giữ nguyên.
  */
 class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("HumanHybrid", parent) {
 
@@ -45,12 +44,12 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
 
     private val dynamic = tree(Dynamic())
 
-    // EMA internal state (keeps filtered predicted rotation)
+    // EMA internal state (keeps filtered predicted rotation) — chưa triển khai đầy đủ, giữ lại
     private var emaYaw: Float? = null
     private var emaPitch: Float? = null
     private var emaCount = 0
     private val emaInitWindow = 3
-    private val emaAlpha = 0.28f // fixed internal default
+    private val emaAlpha = 0.28f
 
     override fun process(
         rotationTarget: RotationTarget,
@@ -64,7 +63,7 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         val entity = rotationTarget.entity
         val distance = entity?.let { player.boxedDistanceTo(it) } ?: 0.0
 
-        // Fix compile: use explicit if/else for checkDistance to avoid overload ambiguity
+        // đảm bảo dùng Double cho tính toán distance tương thích với facingEnemy
         val checkDistance = if (distance < 3.0) 3.0 else distance
         val crosshair = entity?.let { facingEnemy(it, checkDistance, currentRotation) } == true
 
@@ -89,7 +88,6 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         val ticksH = floor(abs(diff.deltaYaw) / abs(yawStep)).let { if (it.isNaN()) 0.0 else it }
         val ticksV = floor(abs(diff.deltaPitch) / abs(pitchStep)).let { if (it.isNaN()) 0.0 else it }
 
-        // Avoid kotlin.math.max overload ambiguity by using explicit comparison
         val ticksD = if (ticksH > ticksV) ticksH else ticksV
         return ticksD.toInt().coerceAtLeast(1)
     }
@@ -102,7 +100,7 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         crosshair: Boolean,
         distance: Double
     ): FloatFloatPair {
-        // prediction offset from rotation delta
+        // prediction offset from rotation delta (Float * Float => Float)
         val predYawOffset = diff.deltaYaw * predictionStrength
         val predPitchOffset = diff.deltaPitch * predictionStrength
 
@@ -112,33 +110,47 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
 
         val distCoef = (dynamic.distanceCoef * distance).toFloat()
 
-        // randomness ranges (explicitly cast random() results to Float to avoid Number/Comparable ambiguity)
-        val yawMin = -aYawBase.random().toFloat() + distCoef
-        val yawMax = aYawBase.random().toFloat() + distCoef
-        val yawRange = yawMin..yawMax
+        // --- Robust random range handling (triệt để) ---
+        // - Ép rõ ràng về Float (tránh Number&Comparable ambiguity)
+        // - Đảm bảo min <= max bằng swap (min/max)
+        // - Dùng ClosedFloatingPointRange<Float> rõ ràng
+        val yawRandA = aYawBase.random().toFloat()
+        val yawRandB = aYawBase.random().toFloat()
+        val yawMin = (-yawRandA + distCoef)
+        val yawMax = (yawRandB + distCoef)
+        val yawLo = min(yawMin, yawMax)
+        val yawHi = max(yawMin, yawMax)
+        val yawRange: ClosedFloatingPointRange<Float> = yawLo..yawHi
 
-        val pitchMin = -aPitchBase.random().toFloat() + distCoef
-        val pitchMax = aPitchBase.random().toFloat() + distCoef
-        val pitchRange = pitchMin..pitchMax
+        val pitchRandA = aPitchBase.random().toFloat()
+        val pitchRandB = aPitchBase.random().toFloat()
+        val pitchMin = (-pitchRandA + distCoef)
+        val pitchMax = (pitchRandB + distCoef)
+        val pitchLo = min(pitchMin, pitchMax)
+        val pitchHi = max(pitchMin, pitchMax)
+        val pitchRange: ClosedFloatingPointRange<Float> = pitchLo..pitchHi
 
-        // acceleration-like delta
-        val yawAccel = RotationUtil.angleDifference(diff.deltaYaw, prevDiff.deltaYaw).coerceIn(yawRange)
-        val pitchAccel = RotationUtil.angleDifference(diff.deltaPitch, prevDiff.deltaPitch).coerceIn(pitchRange)
+        // angleDifference có thể trả Double ở một số impl -> ép về Float để coerceIn hoạt động
+        val yawDiff = RotationUtil.angleDifference(diff.deltaYaw, prevDiff.deltaYaw).toFloat()
+        val pitchDiff = RotationUtil.angleDifference(diff.deltaPitch, prevDiff.deltaPitch).toFloat()
 
-        // human-like jitter
+        val yawAccel = yawDiff.coerceIn(yawRange)
+        val pitchAccel = pitchDiff.coerceIn(pitchRange)
+
+        // human-like jitter (Double -> Float)
         val jitterYaw = ((sin(System.nanoTime() * 1e-9 * 3.0) * 0.5) * humanJitter).toFloat()
         val jitterPitch = ((cos(System.nanoTime() * 1e-9 * 2.7) * 0.4) * humanJitter).toFloat()
 
-        // final step
+        // final step composition (Float)
         var finalYaw = prevDiff.deltaYaw + yawAccel + predYawOffset + jitterYaw
         var finalPitch = prevDiff.deltaPitch + pitchAccel + predPitchOffset + jitterPitch
 
-        // clamp per-tick
+        // clamp per-tick: dùng coerceIn(min, max) overload để tránh ambiguity với range operator
         val ms = maxStep
-        finalYaw = finalYaw.coerceIn(-ms..ms)
-        finalPitch = finalPitch.coerceIn(-ms..ms)
+        finalYaw = finalYaw.coerceIn(-ms, ms)
+        finalPitch = finalPitch.coerceIn(-ms, ms)
 
-        // normalize/wrap angles
+        // normalize/wrap angles and clamp pitch
         finalYaw = wrapAngle180(finalYaw)
         finalPitch = wrapAngle180(finalPitch).coerceIn(-90f, 90f)
 
