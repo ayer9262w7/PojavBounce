@@ -20,6 +20,8 @@
 package net.ccbluex.liquidbounce.features.module.modules.combat.killaura
 
 import com.google.gson.JsonObject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import net.ccbluex.liquidbounce.config.types.NamedChoice
 import net.ccbluex.liquidbounce.event.Sequence
@@ -237,6 +239,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
     val movementTracker = MovementHistoryTracker()
     private val learningEnabled by boolean("LearningEnabled", true)
+    private val aiScope = CoroutineScope(Dispatchers.Default)
     // =============================
 
     val clickScheduler = tree(KillAuraClicker)
@@ -289,6 +292,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         KillAuraAutoBlock.stopBlocking()
         KillAuraNotifyWhenFail.failedHitsIncrement = 0
         targetTracker.stickyTarget = null
+        aiScope.cancel()
     }
 
     @Suppress("unused")
@@ -368,16 +372,25 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
         // Sử dụng AI để dự đoán vị trí và tối ưu hóa tấn công
         val aiContext = createAIContext()
-        val aiOptimalTarget = if (learningEnabled) KillAuraAIPredictor.getOptimalTarget(aiContext) else target
-        val predictedPos = if (learningEnabled) KillAuraAIPredictor.predictTargetPosition(aiOptimalTarget ?: target, 3) else target.pos
+        val aiOptimalTarget = if (learningEnabled) {
+            try {
+                KillAuraAIPredictor.getOptimalTarget(aiContext)
+            } catch (e: Exception) {
+                null
+            }
+        } else {
+            null
+        }
+        
+        val finalTarget = aiOptimalTarget ?: target
 
         // ===== BẮT ĐẦU ĐOẠN CODE CẢI TIẾN =====
-        val finalTarget = if (samePlayer && targetTracker.stickyTarget != null) {
+        val crosshairTarget = if (samePlayer && targetTracker.stickyTarget != null) {
             // Nếu SamePlayer đang bật và có mục tiêu ghim, luôn dùng mục tiêu đó làm mục tiêu cuối cùng.
             targetTracker.stickyTarget
         } else {
             // Nếu không, mới thực hiện logic raycast và tìm mục tiêu dưới con trỏ chuột như cũ.
-            val crosshairTarget = when {
+            val raycastTarget = when {
                 raycast != TRACE_NONE -> {
                     raytraceEntity(range.toDouble(), rotation, filter = {
                         when (raycast) {
@@ -385,21 +398,26 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                             TRACE_ALL -> true
                             else -> false
                         }
-                    })?.entity ?: target
+                    })?.entity ?: finalTarget
                 }
-                else -> target
+                else -> finalTarget
             }
 
-            if (crosshairTarget is LivingEntity && crosshairTarget.shouldBeAttacked() && crosshairTarget != target) {
-                targetTracker.target = crosshairTarget
+            if (raycastTarget is LivingEntity && raycastTarget.shouldBeAttacked() && raycastTarget != finalTarget) {
+                raycastTarget
+            } else {
+                finalTarget
             }
-            
-            crosshairTarget // Mục tiêu cuối cùng trong trường hợp này là kết quả của raycast.
+        }
+
+        // Cập nhật target tracker nếu cần
+        if (crosshairTarget != targetTracker.target && crosshairTarget is LivingEntity) {
+            targetTracker.target = crosshairTarget
         }
 
         // Chỉ thực hiện tấn công nếu có một mục tiêu hợp lệ cuối cùng.
-        if (finalTarget != null) {
-            attackTarget(this, finalTarget, rotation, predictedPos)
+        if (crosshairTarget != null) {
+            attackTarget(this, crosshairTarget, rotation)
         }
         // ===== KẾT THÚC ĐOẠN CODE CẢI TIẾN =====
     }
@@ -417,7 +435,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     }
 
     @Suppress("CognitiveComplexity", "CyclomaticComplexMethod")
-    private suspend fun attackTarget(sequence: Sequence, target: Entity, rotation: Rotation, predictedPos: Vec3d? = null) {
+    private suspend fun attackTarget(sequence: Sequence, target: Entity, rotation: Rotation) {
         KillAuraAutoBlock.makeSeemBlock()
 
         val isFacingEnemy = facingEnemy(toEntity = target, rotation = rotation,
@@ -428,7 +446,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         ModuleDebug.debugParameter(ModuleKillAura, "Rotation", rotation)
         ModuleDebug.debugParameter(ModuleKillAura, "Target", target.nameForScoreboard)
 
-        if (!isFacingEnemy) {
+        if (!isFacingEn Enemy) {
             if (KillAuraAutoBlock.enabled && KillAuraAutoBlock.onScanRange &&
                 player.squaredBoxedDistanceTo(target) <= (range + currentScanExtraRange).pow(2)) {
                 KillAuraAutoBlock.startBlocking()
@@ -458,9 +476,13 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                 val success = target.attack(true, keepSprint && !shouldBlockSprinting)
 
                 // AI học từ kết quả (gọi trong coroutine)
-                if (learningEnabled) {
-                    launch {
-                        KillAuraLearningSystem.learnFromResult(target, success)
+                if (learningEnabled && success) {
+                    aiScope.launch {
+                        try {
+                            KillAuraLearningSystem.learnFromResult(target, success)
+                        } catch (e: Exception) {
+                            // Ignore learning errors
+                        }
                     }
                 }
 
