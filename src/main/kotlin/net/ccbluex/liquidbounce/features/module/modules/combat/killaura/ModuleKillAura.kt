@@ -80,6 +80,14 @@ import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.acos
 
+// THÊM IMPORT ULTIMATE AIM PROCESSOR
+import net.ccbluex.liquidbounce.utils.aiming.features.processors.anglesmooth.impl.UltimateAimProcessor
+import net.ccbluex.liquidbounce.utils.aiming.features.processors.anglesmooth.impl.ConstantAngleSmoothProcessor
+import net.ccbluex.liquidbounce.utils.aiming.features.processors.anglesmooth.impl.LinearAngleSmoothProcessor
+import net.ccbluex.liquidbounce.utils.aiming.features.processors.anglesmooth.impl.RelativeAngleSmoothProcessor
+import net.ccbluex.liquidbounce.utils.aiming.features.processors.anglesmooth.impl.StaticAngleSmoothProcessor
+import net.ccbluex.liquidbounce.utils.aiming.features.processors.anglesmooth.impl.WeightedAngleSmoothProcessor
+
 @Suppress("MagicNumber")
 object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
@@ -244,11 +252,19 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     private val aiScope = CoroutineScope(Job() + Dispatchers.Default)
     // =============================
 
+    // THÊM CÁC VALUES CHO ULTIMATE AIM PROCESSOR
+    private val smoothMode by enumChoice("SmoothMode", SmoothMode.ULTIMATE)
+    private val trackingStrength by float("TrackingPower", 95f, 50f, 100f)
+    private val evasionLevel by float("EvasionLevel", 85f, 50f, 100f)
+    private val predictionPower by float("Prediction", 90f, 50f, 100f)
+    private val smoothAmount by float("SmoothAmount", 10f, 0f, 100f)
+
+    private var aimProcessor: AngleSmoothProcessor? = null
+
     val clickScheduler = tree(KillAuraClicker)
     
     internal val range by float("Range", 4.2f, 1f..8f)
     internal val wallRange by float("WallRange", 3f, 0f..8f).onChange { newValue ->
-        // onChange expected to return the effective Float value; clamp to range if needed.
         if (newValue > range) range else newValue
     }
 
@@ -285,13 +301,30 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         tree(KillAuraFightBot)
     }
 
+    override fun enable() {
+        super.enable()
+        // Khởi tạo aim processor khi module được bật
+        aimProcessor = when (smoothMode) {
+            SmoothMode.CONSTANT -> ConstantAngleSmoothProcessor(smoothAmount)
+            SmoothMode.LINEAR -> LinearAngleSmoothProcessor(smoothAmount)
+            SmoothMode.RELATIVE -> RelativeAngleSmoothProcessor(smoothAmount)
+            SmoothMode.STATIC -> StaticAngleSmoothProcessor(smoothAmount)
+            SmoothMode.WEIGHTED -> WeightedAngleSmoothProcessor(smoothAmount)
+            SmoothMode.ULTIMATE -> UltimateAimProcessor(
+                trackingStrength,
+                evasionLevel,
+                predictionPower
+            )
+        }
+    }
+
     override fun disable() {
         targetTracker.reset()
         failedHits.clear()
         KillAuraAutoBlock.stopBlocking()
         KillAuraNotifyWhenFail.failedHitsIncrement = 0
         targetTracker.stickyTarget = null
-        // cancel coroutine scope properly
+        aimProcessor = null
         aiScope.cancel()
     }
 
@@ -336,7 +369,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             return@tickHandler
         }
 
-        // Cập nhật lịch sử di chuyển cho tất cả entities
         world.entities.filterIsInstance<LivingEntity>().forEach { entity ->
             movementTracker.updateEntityHistory(entity)
         }
@@ -349,11 +381,9 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
 
         if (target == null) {
-            // stop blocking (don't depend on its return value, treat stopBlocking as side-effect)
             KillAuraAutoBlock.stopBlocking()
 
             if (KillAuraFailSwing.enabled && requirementsMet) {
-                // If there is a tick off scheduled, wait that many ticks before fake swing
                 if (KillAuraAutoBlock.currentTickOff > 0) {
                     this.waitTicks(KillAuraAutoBlock.currentTickOff)
                 }
@@ -372,7 +402,13 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             null
         } ?: RotationManager.currentRotation ?: player.rotation).normalize()
 
-        // Sử dụng AI để dự đoán vị trí và tối ưu hóa tấn công
+        // Áp dụng aim processor nếu có
+        val finalRotation = aimProcessor?.smoothAngle(
+            player.rotation,
+            rotation,
+            target
+        ) ?: rotation
+
         val aiContext = createAIContext()
         val aiOptimalTarget = if (learningEnabled) {
             try {
@@ -386,15 +422,12 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         
         val finalTarget = aiOptimalTarget ?: target
 
-        // ===== BẮT ĐẦU ĐOẠN CODE CẢI TIẾN =====
         val crosshairTarget = if (samePlayer && targetTracker.stickyTarget != null) {
-            // Nếu SamePlayer đang bật và có mục tiêu ghim, luôn dùng mục tiêu đó làm mục tiêu cuối cùng.
             targetTracker.stickyTarget
         } else {
-            // Nếu không, mới thực hiện logic raycast và tìm mục tiêu dưới con trỏ chuột như cũ.
             val raycastTarget = when {
                 raycast != TRACE_NONE -> {
-                    raytraceEntity(range.toDouble(), rotation, filter = {
+                    raytraceEntity(range.toDouble(), finalRotation, filter = {
                         when (raycast) {
                             TRACE_ONLYENEMY -> it.shouldBeAttacked()
                             TRACE_ALL -> true
@@ -412,16 +445,13 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             }
         }
 
-        // Cập nhật target tracker nếu cần
         if (crosshairTarget != targetTracker.target && crosshairTarget is LivingEntity) {
             targetTracker.target = crosshairTarget
         }
 
-        // Chỉ thực hiện tấn công nếu có một mục tiêu hợp lệ cuối cùng.
         if (crosshairTarget != null) {
-            attackTarget(this, crosshairTarget, rotation)
+            attackTarget(this, crosshairTarget, finalRotation)
         }
-        // ===== KẾT THÚC ĐOẠN CODE CẢI TIẾN =====
     }
 
     val shouldBlockSprinting
@@ -455,11 +485,9 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                 return
             }
 
-            // stop blocking as a side-effect (don't rely on return value)
             KillAuraAutoBlock.stopBlocking()
 
             if (KillAuraFailSwing.enabled) {
-                // If currentTickOff indicates a tick off period, wait that many ticks
                 if (KillAuraAutoBlock.currentTickOff > 0) {
                     sequence.waitTicks(KillAuraAutoBlock.currentTickOff)
                 }
@@ -476,17 +504,14 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                     return@attack false
                 }
 
-                // Entity.attack in this repo returns Unit; do the attack and assume success if reached here.
                 target.attack(true, keepSprint && !shouldBlockSprinting)
                 val success = true
 
-                // AI học từ kết quả (gọi trong coroutine)
                 if (learningEnabled && success) {
                     aiScope.launch {
                         try {
                             KillAuraLearningSystem.learnFromResult(target, success)
                         } catch (e: Exception) {
-                            // Ignore learning errors
                         }
                     }
                 }
@@ -519,7 +544,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             playerHealth = player.health,
             playerArmor = player.armor.toFloat(),
             nearbyEnemies = targetTracker.targets().filterIsInstance<LivingEntity>(),
-            networkLatency = 50L // Placeholder
+            networkLatency = 50L
         )
     }
 
@@ -584,11 +609,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         }
     }
 
-    /**
-     * HÀM MỚI ĐƯỢC THÊM VÀO ĐỂ SỬA LỖI XOAY GÓC
-     * Tính toán đường đi góc quay ngắn nhất từ góc hiện tại đến góc mục tiêu.
-     * Nó xử lý vấn đề "xoay vòng" khi đi qua ranh giới -180/180 độ.
-     */
     private fun getShortestAngle(current: Float, target: Float): Float {
         var delta = (target - current) % 360f
         if (delta > 180f) delta -= 360f
@@ -606,7 +626,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         val ticks = rotations.calculateTicks(rotation)
         ModuleDebug.debugParameter(ModuleKillAura, "Rotation Ticks", ticks)
 
-        // LUÔN áp dụng hiệu chỉnh góc ngắn nhất để xoay mượt hơn
         val currentRotation = RotationManager.serverRotation
         val correctedRotation = Rotation(
             getShortestAngle(currentRotation.yaw, rotation.yaw),
@@ -682,7 +701,6 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
             throughSpot
         } else {
-            spot
         }
     }
 
@@ -691,6 +709,16 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         val isInInventoryScreen = isInventoryOpen || isInContainerScreen
 
         return criticalHit && !(isInInventoryScreen && !ignoreOpenInventory && !simulateInventoryClosing)
+    }
+
+    // THÊM ENUM SMOOTH MODE
+    enum class SmoothMode(override val choiceName: String) : NamedChoice {
+        CONSTANT("Constant"),
+        LINEAR("Linear"),
+        RELATIVE("Relative"),
+        STATIC("Static"),
+        WEIGHTED("Weighted"),
+        ULTIMATE("Ultimate")
     }
 
     enum class RaycastMode(override val choiceName: String) : NamedChoice {
