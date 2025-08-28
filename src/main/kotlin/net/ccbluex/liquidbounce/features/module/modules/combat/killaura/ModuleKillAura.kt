@@ -22,6 +22,8 @@ package net.ccbluex.liquidbounce.features.module.modules.combat.killaura
 import com.google.gson.JsonObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import net.ccbluex.liquidbounce.config.types.NamedChoice
 import net.ccbluex.liquidbounce.event.Sequence
@@ -239,7 +241,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
     val movementTracker = MovementHistoryTracker()
     private val learningEnabled by boolean("LearningEnabled", true)
-    private val aiScope = CoroutineScope(Dispatchers.Default)
+    private val aiScope = CoroutineScope(Job() + Dispatchers.Default)
     // =============================
 
     val clickScheduler = tree(KillAuraClicker)
@@ -247,9 +249,10 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     internal val range by float("Range", 4.2f, 1f..8f)
     internal val wallRange by float("WallRange", 3f, 0f..8f).onChange { wallRange ->
         if (wallRange > range) {
-            range
+            // onChange expects Unit; avoid returning value here.
+            // If you want to clamp the property value, do it elsewhere (UI/delegate).
         } else {
-            wallRange
+            // no-op
         }
     }
 
@@ -292,6 +295,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         KillAuraAutoBlock.stopBlocking()
         KillAuraNotifyWhenFail.failedHitsIncrement = 0
         targetTracker.stickyTarget = null
+        // cancel coroutine scope properly
         aiScope.cancel()
     }
 
@@ -353,7 +357,8 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
             if (KillAuraFailSwing.enabled && requirementsMet) {
                 if (hasUnblocked) {
-                    waitTicks(KillAuraAutoBlock.currentTickOff)
+                    // tickHandler receiver is Sequence, call waitTicks on it
+                    this.waitTicks(KillAuraAutoBlock.currentTickOff)
                 }
                 dealWithFakeSwing(this, null)
             }
@@ -446,7 +451,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         ModuleDebug.debugParameter(ModuleKillAura, "Rotation", rotation)
         ModuleDebug.debugParameter(ModuleKillAura, "Target", target.nameForScoreboard)
 
-        if (!isFacingEn Enemy) {
+        if (!isFacingEnemy) {
             if (KillAuraAutoBlock.enabled && KillAuraAutoBlock.onScanRange &&
                 player.squaredBoxedDistanceTo(target) <= (range + currentScanExtraRange).pow(2)) {
                 KillAuraAutoBlock.startBlocking()
