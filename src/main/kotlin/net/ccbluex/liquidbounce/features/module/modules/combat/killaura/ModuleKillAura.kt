@@ -372,16 +372,12 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
      * Tính toán đường đi góc quay ngắn nhất từ góc hiện tại đến góc mục tiêu.
      * Nó xử lý vấn đề "xoay vòng" khi đi qua ranh giới -180/180 độ.
      */
-    private fun getShortestAngle(currentYaw: Float, targetYaw: Float): Float {
-        var delta = (targetYaw - currentYaw) % 360.0f
-        if (delta >= 180.0f) {
-            delta -= 360.0f
-        }
-        if (delta < -180.0f) {
-            delta += 360.0f
-        }
-        return currentYaw + delta
-    }
+private fun getShortestAngle(current: Float, target: Float): Float {
+    var delta = (target - current) % 360f
+    if (delta > 180f) delta -= 360f
+    if (delta < -180f) delta += 360f
+    return current + delta
+}
     
 @Suppress("ReturnCount")
 private fun processTarget(
@@ -393,14 +389,12 @@ private fun processTarget(
     val ticks = rotations.calculateTicks(rotation)
     ModuleDebug.debugParameter(ModuleKillAura, "Rotation Ticks", ticks)
 
-    // Chỉ áp dụng hiệu chỉnh góc ngắn nhất khi chưa hướng vào mục tiêu
-    val currentYaw = RotationManager.serverRotation.yaw
-    val correctedRotation = if (abs(currentYaw - rotation.yaw) > 180) {
-        val shortestYaw = getShortestAngle(currentYaw, rotation.yaw)
-        Rotation(shortestYaw, rotation.pitch)
-    } else {
-        rotation
-    }
+    // LUÔN áp dụng hiệu chỉnh góc ngắn nhất để xoay mượt hơn
+    val currentRotation = RotationManager.serverRotation
+    val correctedRotation = Rotation(
+        getShortestAngle(currentRotation.yaw, rotation.yaw),
+        rotation.pitch
+    )
 
     when (rotations.rotationTiming) {
         SNAP -> if (!clickScheduler.willClickAt(ticks.coerceAtLeast(1))) {
