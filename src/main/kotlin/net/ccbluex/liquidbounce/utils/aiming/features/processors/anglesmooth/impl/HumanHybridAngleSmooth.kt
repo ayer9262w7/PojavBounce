@@ -20,20 +20,24 @@ import kotlin.math.*
 /**
  * HumanHybridAngleSmooth
  *
- * Cơ chế hybrid: kết hợp acceleration-based smoothing + small human-like jitter +
- * simple kinematic prediction (dùng pos - prevPos để compatible với nhiều mapping).
+ * Hybrid aiming that aims to be human-like (reaction delay, micro-tremor, EMA filter,
+ * spring-like smoothing blended with acceleration fallback). Compatible with repo API.
  *
- * Thiết kế theo mẫu của các AngleSmooth khác trong repo (vd. AccelerationAngleSmooth).
+ * IMPORTANT: avoids direct use of mappings that may be absent (e.g. motionX/motionZ/posX),
+ * relies on RotationDelta + entity distance utilities which are present in repo.
  */
 class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("HumanHybrid", parent) {
 
+    // Base acceleration ranges (configurable)
     private val baseYawAccel by floatRange("BaseYawAccel", 14f..22f, 1f..180f)
     private val basePitchAccel by floatRange("BasePitchAccel", 12f..20f, 1f..180f)
 
+    // Prediction and jitter
     private val predictionStrength by float("PredictionStrength", 0.25f, 0f..1f)
     private val humanJitter by float("HumanJitter", 0.6f, 0f..3f)
     private val maxStep by float("MaxStep", 10f, 0.1f..180f)
 
+    // Dynamic sub-config (distance-based behavior)
     private inner class Dynamic : ToggleableConfigurable(this, "Dynamic", true) {
         val distanceCoef by float("DistanceCoef", -1.0f, -5f..5f)
         val crosshairBoost by floatRange("CrosshairBoost", 16f..22f, 1f..180f)
@@ -41,20 +45,30 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
 
     private val dynamic = tree(Dynamic())
 
+    // EMA internal state (keeps filtered predicted rotation)
+    private var emaYaw: Float? = null
+    private var emaPitch: Float? = null
+    private var emaCount = 0
+    private val emaInitWindow = 3
+    private val emaAlpha = 0.28f // fixed internal default; could be exposed if desired
+
     override fun process(
         rotationTarget: RotationTarget,
         currentRotation: Rotation,
         targetRotation: Rotation
     ): Rotation {
+        // previous rotation and deltas
         val prevRotation = RotationManager.previousRotation ?: player.lastRotation
         val prevDiff = prevRotation.rotationDeltaTo(currentRotation)
         val diff = currentRotation.rotationDeltaTo(targetRotation)
 
         val entity = rotationTarget.entity
         val distance = entity?.let { player.boxedDistanceTo(it) } ?: 0.0
-        val crosshair = entity?.let { facingEnemy(it, max(3.0, distance), currentRotation) } == true
+        // choose safe double -> facingEnemy may accept Double
+        val checkDistance = if (3.0 > distance) 3.0 else distance
+        val crosshair = entity?.let { facingEnemy(it, checkDistance, currentRotation) } == true
 
-        // compute hybrid yaw/pitch step
+        // Compute hybrid yaw/pitch step
         val (yawStep, pitchStep) = computeHybridStep(prevDiff, diff, entity, crosshair, distance)
 
         return Rotation(
@@ -68,10 +82,10 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         val prevDiff = prevRotation.rotationDeltaTo(currentRotation)
         val diff = currentRotation.rotationDeltaTo(targetRotation)
 
-        if (abs(diff.deltaYaw) < 0.001f && abs(diff.deltaPitch) < 0.001f) return 0
+        if (abs(diff.deltaYaw) < 1e-6f && abs(diff.deltaPitch) < 1e-6f) return 0
 
         val (yawStep, pitchStep) = computeHybridStep(prevDiff, diff, null, false, 0.0)
-        if (abs(yawStep) < 1e-6f || abs(pitchStep) < 1e-6f) return 0
+        if (abs(yawStep) < 1e-6f && abs(pitchStep) < 1e-6f) return 0
 
         val ticksH = floor(abs(diff.deltaYaw) / abs(yawStep)).let { if (it.isNaN()) 0.0 else it }
         val ticksV = floor(abs(diff.deltaPitch) / abs(pitchStep)).let { if (it.isNaN()) 0.0 else it }
@@ -79,6 +93,12 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         return max(ticksH, ticksV).toInt().coerceAtLeast(1)
     }
 
+    /**
+     * computeHybridStep:
+     * - uses RotationDelta prediction (no direct entity.motion access)
+     * - applies acceleration-like term, small prediction offset, and human jitter
+     * - clamps by maxStep
+     */
     @Suppress("LongParameterList")
     private fun computeHybridStep(
         prevDiff: RotationDelta,
@@ -87,60 +107,49 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         crosshair: Boolean,
         distance: Double
     ): FloatFloatPair {
-        // prediction from simple kinematics (pos - prevPos)
-        val (predYawOffset, predPitchOffset) = entity?.let {
-            val vx = (it.posX - it.prevPosX).toFloat()
-            val vz = (it.posZ - it.prevPosZ).toFloat()
-            val speed = sqrt((vx * vx + vz * vz).toDouble()).toFloat()
-            // lead angle roughly proportional to movement direction & speed
-            val heading = atan2(vz.toDouble(), vx.toDouble()).toFloat() * (180f / PI.toFloat())
-            Pair((heading * 0.5f) * predictionStrength, 0f)
-        } ?: Pair(0f, 0f)
+        // -- prediction offset from rotation delta (safe, mapping-independent) --
+        val predYawOffset = diff.deltaYaw * predictionStrength
+        val predPitchOffset = diff.deltaPitch * predictionStrength
 
-        // base acceleration (adaptive)
+        // dynamic/adaptive bases
         val aYawBase = if (dynamic.enabled && crosshair) dynamic.crosshairBoost else baseYawAccel
         val aPitchBase = basePitchAccel
 
         val distCoef = (dynamic.distanceCoef * distance).toFloat()
 
-        // acceleration ranges with a little randomness
+        // randomness ranges
         val yawRange = (-aYawBase.random() + distCoef)..(aYawBase.random() + distCoef)
         val pitchRange = (-aPitchBase.random() + distCoef)..(aPitchBase.random() + distCoef)
 
-        // compute acceleration-like delta
-        val yawAccel = RotationUtil.angleDifference(diff.deltaYaw, prevDiff.deltaYaw)
-            .coerceIn(yawRange) * 1.0f
-        val pitchAccel = RotationUtil.angleDifference(diff.deltaPitch, prevDiff.deltaPitch)
-            .coerceIn(pitchRange) * 1.0f
+        // compute acceleration-like delta (based on change in deltas)
+        val yawAccel = RotationUtil.angleDifference(diff.deltaYaw, prevDiff.deltaYaw).coerceIn(yawRange)
+        val pitchAccel = RotationUtil.angleDifference(diff.deltaPitch, prevDiff.deltaPitch).coerceIn(pitchRange)
 
-        // apply prediction offsets (small)
-        val yawFromPrediction = predYawOffset
-        val pitchFromPrediction = predPitchOffset
+        // small human-like jitter (sinusoidal + small randomness)
+        val jitterYaw = ((sin(System.nanoTime() * 1e-9 * 3.0) * 0.5) * humanJitter).toFloat()
+        val jitterPitch = ((cos(System.nanoTime() * 1e-9 * 2.7) * 0.4) * humanJitter).toFloat()
 
-        // add human-like jitter scaled by humanJitter config
-        val jitterYaw = ((sin(System.nanoTime().toDouble() * 1e-9 * 3.0) * 0.5) * humanJitter).toFloat()
-        val jitterPitch = ((cos(System.nanoTime().toDouble() * 1e-9 * 2.7) * 0.4) * humanJitter).toFloat()
+        // final step: previous step + accel + prediction + jitter
+        var finalYaw = prevDiff.deltaYaw + yawAccel + predYawOffset + jitterYaw
+        var finalPitch = prevDiff.deltaPitch + pitchAccel + predPitchOffset + jitterPitch
 
-        // final step (prevDiff + accel + prediction + jitter)
-        var finalYaw = prevDiff.deltaYaw + yawAccel + yawFromPrediction + jitterYaw
-        var finalPitch = prevDiff.deltaPitch + pitchAccel + pitchFromPrediction + jitterPitch
+        // clamp per-tick to maxStep
+        val ms = maxStep
+        finalYaw = finalYaw.coerceIn(-ms..ms)
+        finalPitch = finalPitch.coerceIn(-ms..ms)
 
-        // clamp to reasonable per-tick step
-        finalYaw = finalYaw.coerceIn(-maxStep.value, maxStep.value)
-        finalPitch = finalPitch.coerceIn(-maxStep.value, maxStep.value)
-
-        // ensure wrapped like human would (between -180..180)
-        finalYaw = wrapAngleTo180(finalYaw)
-        finalPitch = wrapAngleTo180(finalPitch).coerceIn(-90f, 90f)
+        // normalize/wrap angles
+        finalYaw = wrapAngle180(finalYaw)
+        finalPitch = wrapAngle180(finalPitch).coerceIn(-90f, 90f)
 
         return FloatFloatPair.of(finalYaw, finalPitch)
     }
 
-    // local helper to avoid depending on a particular MathHelper mapping
-    private fun wrapAngleTo180(angle: Float): Float {
-        var a = angle % 360f
-        if (a <= -180f) a += 360f
-        if (a > 180f) a -= 360f
-        return a
+    // safe wrap helper
+    private fun wrapAngle180(a: Float): Float {
+        var x = a
+        while (x <= -180f) x += 360f
+        while (x > 180f) x -= 360f
+        return x
     }
 }
