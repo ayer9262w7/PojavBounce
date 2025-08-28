@@ -23,7 +23,7 @@ import kotlin.math.*
  * Hybrid aiming that aims to be human-like (reaction delay, micro-tremor, EMA filter,
  * spring-like smoothing blended with acceleration fallback).
  *
- * Không sử dụng motionX/motionZ/posX/... để tránh mismatch mapping,
+ * Không dùng motionX/motionZ/posX/... để tránh mismatch mapping,
  * chỉ dựa trên RotationDelta + entity distance (đã có trong repo).
  */
 class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("HumanHybrid", parent) {
@@ -64,7 +64,7 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         val entity = rotationTarget.entity
         val distance = entity?.let { player.boxedDistanceTo(it) } ?: 0.0
 
-        // ✅ fix compile: dùng if/else thay vì max()
+        // Fix compile: use explicit if/else for checkDistance to avoid overload ambiguity
         val checkDistance = if (distance < 3.0) 3.0 else distance
         val crosshair = entity?.let { facingEnemy(it, checkDistance, currentRotation) } == true
 
@@ -89,7 +89,9 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         val ticksH = floor(abs(diff.deltaYaw) / abs(yawStep)).let { if (it.isNaN()) 0.0 else it }
         val ticksV = floor(abs(diff.deltaPitch) / abs(pitchStep)).let { if (it.isNaN()) 0.0 else it }
 
-        return max(ticksH, ticksV).toInt().coerceAtLeast(1)
+        // Avoid kotlin.math.max overload ambiguity by using explicit comparison
+        val ticksD = if (ticksH > ticksV) ticksH else ticksV
+        return ticksD.toInt().coerceAtLeast(1)
     }
 
     @Suppress("LongParameterList")
