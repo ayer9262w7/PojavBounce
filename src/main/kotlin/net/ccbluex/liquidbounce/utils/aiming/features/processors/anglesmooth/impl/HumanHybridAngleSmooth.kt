@@ -21,13 +21,8 @@ import kotlin.random.Random
 /**
  * HumanHybridAngleSmooth
  *
- * Robust fix: tránh dùng extension random()/range operator trực tiếp trên các giá trị config
- * (nguyên nhân compiler ambiguity với Number & Comparable<Nothing>).
- *
- * Giải pháp:
- * - Lấy giá trị numeric trực tiếp nếu là Number
- * - Nếu không phải Number, thử parse từ toString()
- * - Tránh mọi kiểm tra kiểu ClosedRange/ClosedFloatingPointRange để không gây ambiguity cho compiler
+ * Fix: tránh gán các config-delegate khác kiểu vào cùng một biến; sample trực tiếp per-branch
+ * để compiler không suy kiểu Comparable<Nothing>.
  */
 class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("HumanHybrid", parent) {
 
@@ -48,7 +43,7 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
 
     private val dynamic = tree(Dynamic())
 
-    // EMA internal state (keeps filtered predicted rotation) — giữ lại cho sau
+    // EMA internal state (keeps filtered predicted rotation) — giữ lại
     private var emaYaw: Float? = null
     private var emaPitch: Float? = null
     private var emaCount = 0
@@ -107,31 +102,35 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         val predYawOffset = diff.deltaYaw * predictionStrength
         val predPitchOffset = diff.deltaPitch * predictionStrength
 
-        // dynamic/adaptive bases (these are config-backed values; could be Number or range-like)
-        val aYawBase = if (dynamic.enabled && crosshair) dynamic.crosshairBoost else baseYawAccel
-        val aPitchBase = basePitchAccel
-
         val distCoef = (dynamic.distanceCoef * distance).toFloat()
 
-        // Robust sampling helper: avoid pattern-matching on ClosedRange to prevent compiler ambiguity.
-        fun sampleFloatFromConfig(value: Any?, fallback: Float = 0f): Float {
-            // If the delegate returns a Number, use it directly.
+        // helper: lấy numeric nếu là Number, hoặc cố parse toString() -> Float
+        fun extractFloat(value: Any?, fallback: Float = 0f): Float {
             if (value is Number) return value.toFloat()
-            // Otherwise, try to parse numeric text representation as a last resort.
-            val s = value?.toString()
-            return s?.toFloatOrNull() ?: fallback
+            return value?.toString()?.toFloatOrNull() ?: fallback
         }
 
-        // Sample two random magnitudes to avoid relying on ambiguous extension random()
-        val yawRandA = sampleFloatFromConfig(aYawBase, 0f)
-        val yawRandB = sampleFloatFromConfig(aYawBase, 0f)
+        // --- Sample trực tiếp per-branch để tránh gán delegate khác kiểu vào cùng 1 var ---
+        val yawRandA = if (dynamic.enabled && crosshair) {
+            // dynamic.crosshairBoost có thể là delegate/range; extractFloat trả Float hoặc parse
+            extractFloat(dynamic.crosshairBoost, 0f)
+        } else {
+            extractFloat(baseYawAccel, 0f)
+        }
+        val yawRandB = if (dynamic.enabled && crosshair) {
+            extractFloat(dynamic.crosshairBoost, 0f)
+        } else {
+            extractFloat(baseYawAccel, 0f)
+        }
+
+        val pitchRandA = extractFloat(basePitchAccel, 0f)
+        val pitchRandB = extractFloat(basePitchAccel, 0f)
+
         val yawMin = -yawRandA + distCoef
         val yawMax = yawRandB + distCoef
         val yawLo = min(yawMin, yawMax)
         val yawHi = max(yawMin, yawMax)
 
-        val pitchRandA = sampleFloatFromConfig(aPitchBase, 0f)
-        val pitchRandB = sampleFloatFromConfig(aPitchBase, 0f)
         val pitchMin = -pitchRandA + distCoef
         val pitchMax = pitchRandB + distCoef
         val pitchLo = min(pitchMin, pitchMax)
@@ -141,8 +140,11 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         val yawDiff = RotationUtil.angleDifference(diff.deltaYaw, prevDiff.deltaYaw).toFloat()
         val pitchDiff = RotationUtil.angleDifference(diff.deltaPitch, prevDiff.deltaPitch).toFloat()
 
-        val yawAccel = yawDiff.coerceIn(yawLo, yawHi)
-        val pitchAccel = pitchDiff.coerceIn(pitchLo, pitchHi)
+        // sample uniform in [lo, hi] by using kotlin.random (preserve randomness behavior)
+        fun sampleIn(lo: Float, hi: Float): Float = if (hi <= lo) lo else Random.nextFloat() * (hi - lo) + lo
+
+        val yawAccel = yawDiff.coerceIn(sampleIn(yawLo, yawHi), sampleIn(yawLo, yawHi)) // sample to generate accel bounds
+        val pitchAccel = pitchDiff.coerceIn(sampleIn(pitchLo, pitchHi), sampleIn(pitchLo, pitchHi))
 
         // human-like jitter
         val jitterYaw = ((sin(System.nanoTime() * 1e-9 * 3.0) * 0.5) * humanJitter).toFloat()
