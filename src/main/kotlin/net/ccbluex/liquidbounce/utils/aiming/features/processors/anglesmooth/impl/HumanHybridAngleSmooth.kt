@@ -14,42 +14,61 @@ import net.ccbluex.liquidbounce.utils.entity.boxedDistanceTo
 import net.ccbluex.liquidbounce.utils.entity.lastRotation
 import net.ccbluex.liquidbounce.utils.kotlin.component1
 import net.ccbluex.liquidbounce.utils.kotlin.component2
+import net.minecraft.util.math.MathHelper
 import kotlin.math.*
 import kotlin.random.Random
 
-/**
- * HumanHybridAngleSmooth
- *
- * Bản vá: giữ declarations của delegate (float / floatRange) nhưng khi cần lấy min/ max
- * sẽ dùng helper extractNumericInterval / extractNumericValue để trả về Pair<Float,Float> hoặc Float,
- * tránh việc compiler suy ra kiểu chung không mong muốn khi kết hợp các delegate khác kiểu.
- *
- * Mục tiêu: vẫn giữ khả năng cấu hình (config tree) trong UI nhưng biên dịch an toàn.
- */
-class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("HumanHybrid", parent) {
+// Đặt tên mới để thể hiện sự nâng cấp, nhưng tên trong game vẫn là "HumanHybridV2" cho quen thuộc
+class AdvancedHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("HumanHybridV2", parent) {
 
-    // --- Config delegates (Sửa lỗi: Bỏ 'by', gán trực tiếp đối tượng config) ---
-    private val baseYawAccel = floatRange("BaseYawAccel", 14f..22f, 1f..180f)
-    private val basePitchAccel = floatRange("BasePitchAccel", 12f..20f, 1f..180f)
-
-    private inner class Dynamic : ToggleableConfigurable(this, "Dynamic", true) {
-        val distanceCoef = float("DistanceCoef", -1.0f, -5f..5f)
-        val crosshairBoost = floatRange("CrosshairBoost", 16f..22f, 1f..180f)
+    // --- CÁC THÀNH PHẦN CỐT LÕI ---
+    
+    // 1. Lấy từ HumanHybrid: Gia tốc cơ bản và ảnh hưởng khoảng cách
+    private inner class BaseAcceleration : ToggleableConfigurable(this, "BaseAcceleration", true) {
+        val baseYawAccel by floatRange("BaseYawAccel", 14f..22f, 1f..180f)
+        val basePitchAccel by floatRange("BasePitchAccel", 12f..20f, 1f..180f)
+        val distanceCoef by float("DistanceCoef", -1.0f, -5f..5f)
+        val crosshairBoost by floatRange("CrosshairBoost", 16f..22f, 1f..180f)
     }
 
-    private val dynamic = tree(Dynamic())
+    // 2. Lấy từ Acceleration: Cơ chế giảm tốc khi gần mục tiêu -> Tăng tracking
+    private inner class SigmoidDeceleration : ToggleableConfigurable(this, "SigmoidDeceleration", true) {
+        val steepness by float("Steepness", 10f, 0.0f..20f)
+        val midpoint by float("Midpoint", 0.3f, 0.0f..1.0f)
 
-    // Prediction and jitter defaults (if delegate values cannot be resolved)
-    private val predictionStrengthDefault = 0.25f
-    private val humanJitterDefault = 0.6f
-    private val maxStepDefault = 10f
+        fun computeFactor(rotationDifference: Float): Float {
+            if (!enabled) return 1.0f
+            val scaledDifference = rotationDifference / 180f // Chuẩn hóa góc lệch
+            val sigmoid = 1 / (1 + exp((-steepness * (scaledDifference - midpoint)).toDouble()))
+            return sigmoid.toFloat().coerceIn(0.1f, 1.0f) // Đảm bảo không bao giờ dừng hẳn
+        }
+    }
 
-    // EMA internal state (kept)
-    private var emaYaw: Float? = null
-    private var emaPitch: Float? = null
-    private var emaCount = 0
-    private val emaInitWindow = 3
-    private val emaAlpha = 0.28f
+    // 3. Nâng cấp: Kết hợp Prediction và Jitter từ HumanHybrid vào một module riêng -> Tăng humanization
+    private inner class Humanization : ToggleableConfigurable(this, "Humanization", true) {
+        val predictionStrength by float("PredictionStrength", 0.25f, 0f..2f)
+        val humanJitter by float("HumanJitter", 0.6f, 0f..5f)
+
+        fun getOffsets(diff: RotationDelta): FloatFloatPair {
+            if (!enabled) return FloatFloatPair.of(0f, 0f)
+            
+            // Lấy logic Prediction từ HumanHybrid
+            val predYawOffset = diff.deltaYaw * predictionStrength
+            val predPitchOffset = diff.deltaPitch * predictionStrength
+
+            // Lấy logic Jitter (run lắc) từ HumanHybrid
+            val jitterYaw = (sin(System.nanoTime() * 1e-9 * 3.0) * 0.5 * humanJitter).toFloat()
+            val jitterPitch = (cos(System.nanoTime() * 1e-9 * 2.7) * 0.4 * humanJitter).toFloat()
+
+            return FloatFloatPair.of(predYawOffset + jitterYaw, predPitchOffset + jitterPitch)
+        }
+    }
+
+    private val baseAcceleration = tree(BaseAcceleration())
+    private val sigmoidDeceleration = tree(SigmoidDeceleration())
+    private val humanization = tree(Humanization())
+    
+    private val maxStepDefault by float("MaxStepPerTick", 15f, 1f..180f)
 
     override fun process(
         rotationTarget: RotationTarget,
@@ -62,11 +81,9 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
 
         val entity = rotationTarget.entity
         val distance = entity?.let { player.boxedDistanceTo(it) } ?: 0.0
+        val crosshair = entity?.let { facingEnemy(it, max(3.0, distance), currentRotation) } == true
 
-        val checkDistance = if (distance < 3.0) 3.0 else distance
-        val crosshair = entity?.let { facingEnemy(it, checkDistance, currentRotation) } == true
-
-        val (yawStep, pitchStep) = computeHybridStep(prevDiff, diff, entity, crosshair, distance)
+        val (yawStep, pitchStep) = computeTurnSpeed(prevDiff, diff, crosshair, distance)
 
         return Rotation(
             currentRotation.yaw + yawStep,
@@ -81,224 +98,66 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
 
         if (abs(diff.deltaYaw) < 1e-6f && abs(diff.deltaPitch) < 1e-6f) return 0
 
-        val (yawStep, pitchStep) = computeHybridStep(prevDiff, diff, null, false, 0.0)
+        val (yawStep, pitchStep) = computeTurnSpeed(prevDiff, diff, false, 0.0)
         if (abs(yawStep) < 1e-6f && abs(pitchStep) < 1e-6f) return 0
 
         val ticksH = floor(abs(diff.deltaYaw) / abs(yawStep)).let { if (it.isNaN()) 0.0 else it }
         val ticksV = floor(abs(diff.deltaPitch) / abs(pitchStep)).let { if (it.isNaN()) 0.0 else it }
 
-        val ticksD = if (ticksH > ticksV) ticksH else ticksV
-        return ticksD.toInt().coerceAtLeast(1)
+        return max(ticksH, ticksV).toInt().coerceAtLeast(1)
     }
 
     @Suppress("LongParameterList")
-    private fun computeHybridStep(
+    private fun computeTurnSpeed(
         prevDiff: RotationDelta,
         diff: RotationDelta,
-        entity: net.minecraft.entity.Entity?,
         crosshair: Boolean,
         distance: Double
     ): FloatFloatPair {
-        // prediction offsets
-        val predictionStrength = predictionStrengthDefault
-        val predYawOffset = diff.deltaYaw * predictionStrength
-        val predPitchOffset = diff.deltaPitch * predictionStrength
-
-        val humanJitter = humanJitterDefault
-        val maxStep = maxStepDefault
-
-        // Sửa lỗi: Gọi hàm từ Companion object để tránh xung đột tên
-        val distCoefSingle = try {
-            Companion.extractNumericValue(dynamic.distanceCoef, -1.0f)
-        } catch (_: Throwable) {
-            -1.0f
-        }
-        
-        // Cải tiến: Xử lý các trường hợp distance là NaN hoặc Infinity để tránh lỗi runtime
+        // --- BƯỚC 1: TÍNH TOÁN GIA TỐC CƠ BẢN (Lấy ý tưởng từ HumanHybrid) ---
         val distCoef = if (distance.isFinite()) {
-            (distCoefSingle * distance).toFloat()
+            (baseAcceleration.distanceCoef * distance).toFloat()
         } else {
-            0f // Giá trị mặc định an toàn
+            0f
         }
 
-        // Determine yaw interval numeric pair (lo, hi) using delegates but extracted safely
-        val baseYawFallbackLo = 14f
-        val baseYawFallbackHi = 22f
-        val basePitchFallbackLo = 12f
-        val basePitchFallbackHi = 20f
-        val crosshairFallbackLo = 16f
-        val crosshairFallbackHi = 22f
+        val useCrosshairBoost = baseAcceleration.enabled && crosshair
+        val yawInterval = if (useCrosshairBoost) baseAcceleration.crosshairBoost else baseAcceleration.baseYawAccel
+        val pitchInterval = baseAcceleration.basePitchAccel
 
-        // Sửa lỗi: Gọi hàm từ Companion object để tránh xung đột tên
-        val yawInterval = if (dynamic.enabled && crosshair) {
-            Companion.extractNumericInterval(dynamic.crosshairBoost, crosshairFallbackLo, crosshairFallbackHi)
-        } else {
-            Companion.extractNumericInterval(baseYawAccel, baseYawFallbackLo, baseYawFallbackHi)
-        }
-        val pitchInterval = Companion.extractNumericInterval(basePitchAccel, basePitchFallbackLo, basePitchFallbackHi)
+        fun sample(range: ClosedFloatingPointRange<Float>): Float = Random.nextFloat() * (range.endInclusive - range.start) + range.start
+        
+        // Tạo gia tốc bất đối xứng (đặc trưng của HumanHybrid)
+        val yawRandA = sample(yawInterval)
+        val yawRandB = sample(yawInterval)
+        val pitchRandA = sample(pitchInterval)
+        val pitchRandB = sample(pitchInterval)
 
-        // Utility: sample float from [lo, hi]
-        fun sample(lo: Float, hi: Float): Float = if (hi <= lo) lo else Random.nextFloat() * (hi - lo) + lo
+        val yawAccelRange = min(-yawRandA, yawRandB) + distCoef .. max(-yawRandA, yawRandB) + distCoef
+        val pitchAccelRange = min(-pitchRandA, pitchRandB) + distCoef .. max(-pitchRandA, pitchRandB) + distCoef
+        
+        val neededYawAccel = RotationUtil.angleDifference(diff.deltaYaw, prevDiff.deltaYaw)
+        val neededPitchAccel = RotationUtil.angleDifference(diff.deltaPitch, prevDiff.deltaPitch)
 
-        // Sample two magnitudes to compose asymmetric min/max using distCoef like original design
-        val yawRandA = sample(yawInterval.first, yawInterval.second)
-        val yawRandB = sample(yawInterval.first, yawInterval.second)
-        val pitchRandA = sample(pitchInterval.first, pitchInterval.second)
-        val pitchRandB = sample(pitchInterval.first, pitchInterval.second)
+        var finalYawAccel = neededYawAccel.coerceIn(yawAccelRange)
+        var finalPitchAccel = neededPitchAccel.coerceIn(pitchAccelRange)
 
-        val yawMin = -yawRandA + distCoef
-        val yawMax = yawRandB + distCoef
-        val yawLo = min(yawMin, yawMax)
-        val yawHi = max(yawMin, yawMax)
+        // --- BƯỚC 2: ÁP DỤNG GIẢM TỐC (Lấy từ Acceleration để tăng tracking) ---
+        val decelerationFactor = sigmoidDeceleration.computeFactor(diff.length())
+        finalYawAccel *= decelerationFactor
+        finalPitchAccel *= decelerationFactor
 
-        val pitchMin = -pitchRandA + distCoef
-        val pitchMax = pitchRandB + distCoef
-        val pitchLo = min(pitchMin, pitchMax)
-        val pitchHi = max(pitchMin, pitchMax)
+        // --- BƯỚC 3: THÊM CÁC YẾU TỐ "CON NGƯỜI" (Nâng cấp từ HumanHybrid) ---
+        val (humanYawOffset, humanPitchOffset) = humanization.getOffsets(diff)
 
-        // angle difference -> ensure Float
-        val yawDiff = RotationUtil.angleDifference(diff.deltaYaw, prevDiff.deltaYaw).toFloat()
-        val pitchDiff = RotationUtil.angleDifference(diff.deltaPitch, prevDiff.deltaPitch).toFloat()
-
-        // sample inner bounds to create variability (keeps randomness behavior)
-        val yawAccelLo = sample(yawLo, yawHi)
-        val yawAccelHi = sample(yawLo, yawHi)
-        val pitchAccelLo = sample(pitchLo, pitchHi)
-        val pitchAccelHi = sample(pitchLo, pitchHi)
-
-        val yawAccel = yawDiff.coerceIn(min(yawAccelLo, yawAccelHi), max(yawAccelLo, yawAccelHi))
-        val pitchAccel = pitchDiff.coerceIn(min(pitchAccelLo, pitchAccelHi), max(pitchAccelLo, pitchAccelHi))
-
-        // human-like jitter
-        val jitterYaw = ((sin(System.nanoTime() * 1e-9 * 3.0) * 0.5) * humanJitter).toFloat()
-        val jitterPitch = ((cos(System.nanoTime() * 1e-9 * 2.7) * 0.4) * humanJitter).toFloat()
-
-        // compose final step
-        var finalYaw = prevDiff.deltaYaw + yawAccel + predYawOffset + jitterYaw
-        var finalPitch = prevDiff.deltaPitch + pitchAccel + predPitchOffset + jitterPitch
-
-        // clamp per-tick using coerceIn(min, max)
-        finalYaw = finalYaw.coerceIn(-maxStep, maxStep)
-        finalPitch = finalPitch.coerceIn(-maxStep, maxStep)
-
-        // normalize/wrap angles and clamp pitch
-        finalYaw = wrapAngle180(finalYaw)
-        finalPitch = wrapAngle180(finalPitch).coerceIn(-90f, 90f)
-
-        return FloatFloatPair.of(finalYaw, finalPitch)
-    }
-
-    private fun wrapAngle180(a: Float): Float {
-        var x = a
-        while (x <= -180f) x += 360f
-        while (x > 180f) x -= 360f
-        return x
-    }
-
-    companion object {
-        // Helper: trả Pair(lo, hi) từ nhiều kiểu delegate/object khác nhau
-        // Nếu không thể trích xuất sẽ trả fallbackLo..fallbackHi
-        private fun extractNumericInterval(value: Any?, fallbackLo: Float, fallbackHi: Float): Pair<Float, Float> {
-            if (value == null) return Pair(fallbackLo, fallbackHi)
-
-            // 1) If Number -> single value
-            if (value is Number) {
-                val v = value.toFloat()
-                return Pair(min(v, v), max(v, v))
-            }
-
-            try {
-                val clazz = value.javaClass
-
-                // try common range properties: start / endInclusive / end / to
-                val startCandidate = try { clazz.getMethod("getStart").invoke(value) } catch (_: Throwable) { null }
-                    ?: try { clazz.getMethod("start").invoke(value) } catch (_: Throwable) { null }
-                    ?: try { clazz.getField("start").get(value) } catch (_: Throwable) { null }
-
-                val endCandidate = try { clazz.getMethod("getEndInclusive").invoke(value) } catch (_: Throwable) { null }
-                    ?: try { clazz.getMethod("endInclusive").invoke(value) } catch (_: Throwable) { null }
-                    ?: try { clazz.getField("endInclusive").get(value) } catch (_: Throwable) { null }
-                    ?: try { clazz.getMethod("getEnd").invoke(value) } catch (_: Throwable) { null }
-                    ?: try { clazz.getMethod("end").invoke(value) } catch (_: Throwable) { null }
-                    ?: try { clazz.getField("end").get(value) } catch (_: Throwable) { null }
-                    ?: try { clazz.getMethod("getTo").invoke(value) } catch (_: Throwable) { null }
-                    ?: try { clazz.getField("to").get(value) } catch (_: Throwable) { null }
-
-                val startNum = startCandidate as? Number
-                val endNum = endCandidate as? Number
-                if (startNum != null && endNum != null) {
-                    val lo = startNum.toFloat()
-                    val hi = endNum.toFloat()
-                    return Pair(min(lo, hi), max(lo, hi))
-                }
-
-                // try names min/max/from/to/first/last/value
-                val tryNames = listOf(
-                    "min", "max", "minimum", "maximum",
-                    "lower", "upper",
-                    "from", "to",
-                    "first", "last",
-                    "value", "v"
-                )
-                var foundLo: Float? = null
-                var foundHi: Float? = null
-                for (ln in tryNames) {
-                    if (foundLo == null) {
-                        val f = try { clazz.getMethod(ln).invoke(value) } catch (_: Throwable) { null }
-                            ?: try { clazz.getMethod("get${ln.replaceFirstChar { it.uppercaseChar() }}").invoke(value) } catch (_: Throwable) { null }
-                            ?: try { clazz.getField(ln).get(value) } catch (_: Throwable) { null }
-                        if (f is Number) foundLo = f.toFloat()
-                    }
-                    if (foundHi == null) {
-                        val h = try { clazz.getMethod(ln).invoke(value) } catch (_: Throwable) { null }
-                            ?: try { clazz.getMethod("get${ln.replaceFirstChar { it.uppercaseChar() }}").invoke(value) } catch (_: Throwable) { null }
-                            ?: try { clazz.getField(ln).get(value) } catch (_: Throwable) { null }
-                        if (h is Number) foundHi = h.toFloat()
-                    }
-                    if (foundLo != null && foundHi != null) break
-                }
-                if (foundLo != null && foundHi != null) {
-                    return Pair(min(foundLo, foundHi), max(foundLo, foundHi))
-                }
-            } catch (_: Throwable) {
-                // ignore and fallback to parsing string form
-            }
-
-            // Fallback: parse numbers from toString()
-            val s = value.toString()
-            val regex = """-?\d+(?:\.\d+)?""".toRegex()
-            val nums = regex.findAll(s).mapNotNull { it.value.toFloatOrNull() }.toList()
-            return when {
-                nums.size >= 2 -> {
-                    val lo = min(nums[0], nums[1])
-                    val hi = max(nums[0], nums[1])
-                    Pair(lo, hi)
-                }
-                nums.size == 1 -> Pair(nums[0], nums[0])
-                else -> Pair(fallbackLo, fallbackHi)
-            }
-        }
-
-        // Helper: trả 1 Float từ nhiều kiểu (Number, delegated float, etc.), fallback nếu không có
-        private fun extractNumericValue(value: Any?, fallback: Float): Float {
-            if (value == null) return fallback
-            if (value is Number) return value.toFloat()
-            try {
-                val clazz = value.javaClass
-                val fieldNames = listOf("value", "v", "min", "max", "from", "to", "start", "end", "endInclusive")
-                for (n in fieldNames) {
-                    val candidate = try { clazz.getMethod(n).invoke(value) } catch (_: Throwable) { null }
-                        ?: try { clazz.getMethod("get${n.replaceFirstChar { it.uppercaseChar() }}").invoke(value) } catch (_: Throwable) { null }
-                        ?: try { clazz.getField(n).get(value) } catch (_: Throwable) { null }
-                    if (candidate is Number) return candidate.toFloat()
-                }
-            } catch (_: Throwable) {
-                // ignore
-            }
-            // fallback to parse
-            val s = value.toString()
-            val first = """-?\d+(?:\.\d+)?""".toRegex().find(s)?.value
-            return first?.toFloatOrNull() ?: fallback
-        }
+        // --- BƯỚC 4: TỔNG HỢP KẾT QUẢ ---
+        var yawStep = prevDiff.deltaYaw + finalYawAccel + humanYawOffset
+        var pitchStep = prevDiff.deltaPitch + finalPitchAccel + humanPitchOffset
+        
+        // Giới hạn tốc độ quay tối đa mỗi tick
+        yawStep = MathHelper.wrapDegrees(yawStep).coerceIn(-maxStepDefault, maxStepDefault)
+        pitchStep = pitchStep.coerceIn(-maxStepDefault, maxStepDefault)
+        
+        return FloatFloatPair.of(yawStep, pitchStep)
     }
 }
