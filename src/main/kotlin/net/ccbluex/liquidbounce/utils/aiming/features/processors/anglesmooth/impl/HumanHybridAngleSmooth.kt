@@ -18,8 +18,8 @@ import net.minecraft.util.math.MathHelper
 import kotlin.math.*
 import kotlin.random.Random
 
-// Đặt tên mới để thể hiện sự nâng cấp, nhưng tên trong game vẫn là "HumanHybridV2" cho quen thuộc
-class AdvancedHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("HumanHybridV2", parent) {
+// Sửa lỗi 1: Đổi tên lớp và tên trong constructor về lại "HumanHybrid"
+class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("HumanHybrid", parent) {
 
     // --- CÁC THÀNH PHẦN CỐT LÕI ---
     
@@ -81,7 +81,10 @@ class AdvancedHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Hu
 
         val entity = rotationTarget.entity
         val distance = entity?.let { player.boxedDistanceTo(it) } ?: 0.0
-        val crosshair = entity?.let { facingEnemy(it, max(3.0, distance), currentRotation) } == true
+        
+        // Sửa lỗi 2: Thêm .toFloat() để ép kiểu kết quả của max() thành Float
+        val checkDistance = max(3.0, distance).toFloat()
+        val crosshair = entity?.let { facingEnemy(it, checkDistance, currentRotation) } == true
 
         val (yawStep, pitchStep) = computeTurnSpeed(prevDiff, diff, crosshair, distance)
 
@@ -101,8 +104,9 @@ class AdvancedHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Hu
         val (yawStep, pitchStep) = computeTurnSpeed(prevDiff, diff, false, 0.0)
         if (abs(yawStep) < 1e-6f && abs(pitchStep) < 1e-6f) return 0
 
-        val ticksH = floor(abs(diff.deltaYaw) / abs(yawStep)).let { if (it.isNaN()) 0.0 else it }
-        val ticksV = floor(abs(diff.deltaPitch) / abs(pitchStep)).let { if (it.isNaN()) 0.0 else it }
+        // Cải tiến nhỏ: Đảm bảo các biến là Float để hàm max hoạt động nhất quán
+        val ticksH = floor(abs(diff.deltaYaw) / abs(yawStep)).let { if (it.isNaN()) 0.0f else it.toFloat() }
+        val ticksV = floor(abs(diff.deltaPitch) / abs(pitchStep)).let { if (it.isNaN()) 0.0f else it.toFloat() }
 
         return max(ticksH, ticksV).toInt().coerceAtLeast(1)
     }
