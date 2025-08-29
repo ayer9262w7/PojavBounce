@@ -14,15 +14,22 @@ import net.ccbluex.liquidbounce.utils.entity.boxedDistanceTo
 import net.ccbluex.liquidbounce.utils.entity.lastRotation
 import net.ccbluex.liquidbounce.utils.kotlin.component1
 import net.ccbluex.liquidbounce.utils.kotlin.component2
-import net.ccbluex.liquidbounce.utils.kotlin.random
 import kotlin.math.*
 import kotlin.random.Random
 
 /**
  * HumanHybridAngleSmooth
  *
- * Fix: tránh gán các config-delegate khác kiểu vào cùng một biến; sample trực tiếp per-branch
- * để compiler không suy kiểu Comparable<Nothing>.
+ * Triệt để sửa các nguồn gây ambiguity kiểu (Number & Comparable<Nothing>) dẫn tới
+ * lỗi compile Kotlin khi dùng các delegate config/range. Giải pháp:
+ *  - Không gán hai delegate khác kiểu vào một biến chung.
+ *  - Không pattern-match trực tiếp vào ClosedRange/ClosedFloatingPointRange (khi làm thế
+ *    compiler vẫn có thể suy ra Comparable<Nothing>).
+ *  - Trích xuất số từ delegate an toàn: nếu là Number thì dùng toFloat(); nếu không thì
+ *    parse chuỗi (regex) để lấy 1 hoặc 2 số (trường hợp range như "14.0..22.0").
+ *  - Không dùng toán tử .. trên giá trị không rõ kiểu; dùng coerceIn(min, max).
+ *
+ * Mục tiêu: compile sạch trên Actions + giữ nguyên hành vi (prediction, jitter, distCoef...)
  */
 class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("HumanHybrid", parent) {
 
@@ -43,7 +50,7 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
 
     private val dynamic = tree(Dynamic())
 
-    // EMA internal state (keeps filtered predicted rotation) — giữ lại
+    // EMA internal state (keeps filtered predicted rotation) — giữ lại cho tương lai
     private var emaYaw: Float? = null
     private var emaPitch: Float? = null
     private var emaCount = 0
@@ -104,27 +111,57 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
 
         val distCoef = (dynamic.distanceCoef * distance).toFloat()
 
-        // helper: lấy numeric nếu là Number, hoặc cố parse toString() -> Float
-        fun extractFloat(value: Any?, fallback: Float = 0f): Float {
-            if (value is Number) return value.toFloat()
-            return value?.toString()?.toFloatOrNull() ?: fallback
+        // Helper: parse numeric tokens from arbitrary toString() (handles "14.0..22.0", "16.0", etc.)
+        fun parseNumbers(s: String?): List<Float> {
+            if (s == null) return emptyList()
+            val regex = """-?\d+(?:\.\d+)?""".toRegex()
+            return regex.findAll(s).mapNotNull { it.value.toFloatOrNull() }.toList()
         }
 
-        // --- Sample trực tiếp per-branch để tránh gán delegate khác kiểu vào cùng 1 var ---
-        val yawRandA = if (dynamic.enabled && crosshair) {
-            // dynamic.crosshairBoost có thể là delegate/range; extractFloat trả Float hoặc parse
-            extractFloat(dynamic.crosshairBoost, 0f)
-        } else {
-            extractFloat(baseYawAccel, 0f)
-        }
-        val yawRandB = if (dynamic.enabled && crosshair) {
-            extractFloat(dynamic.crosshairBoost, 0f)
-        } else {
-            extractFloat(baseYawAccel, 0f)
+        // Extract a float or a range from a config-backed value robustly without pattern-matching on range types.
+        // If value is Number -> return Number as Float.
+        // Else try parseNumbers on toString(). If it yields >=2 numbers, treat them as [lo, hi].
+        // If yields 1 number -> that number (singleton).
+        // Returns Pair(lo, hi) to represent available numeric interval.
+        fun extractNumericInterval(value: Any?, fallbackLo: Float, fallbackHi: Float): Pair<Float, Float> {
+            if (value is Number) {
+                val v = value.toFloat()
+                return Pair(v, v)
+            }
+            val nums = parseNumbers(value?.toString())
+            return when {
+                nums.size >= 2 -> {
+                    // pick first two as bounds (some config string like "14.0..22.0" -> [14,22])
+                    val lo = min(nums[0], nums[1])
+                    val hi = max(nums[0], nums[1])
+                    Pair(lo, hi)
+                }
+                nums.size == 1 -> Pair(nums[0], nums[0])
+                else -> Pair(fallbackLo, fallbackHi)
+            }
         }
 
-        val pitchRandA = extractFloat(basePitchAccel, 0f)
-        val pitchRandB = extractFloat(basePitchAccel, 0f)
+        // Decide yaw/pitch base numeric intervals per-branch (avoid assigning different delegate types to one var)
+        val baseYawFallbackLo = 14f
+        val baseYawFallbackHi = 22f
+        val basePitchFallbackLo = 12f
+        val basePitchFallbackHi = 20f
+
+        val yawInterval: Pair<Float, Float> = if (dynamic.enabled && crosshair) {
+            extractNumericInterval(dynamic.crosshairBoost, baseYawFallbackLo, baseYawFallbackHi)
+        } else {
+            extractNumericInterval(baseYawAccel, baseYawFallbackLo, baseYawFallbackHi)
+        }
+
+        val pitchInterval: Pair<Float, Float> = extractNumericInterval(basePitchAccel, basePitchFallbackLo, basePitchFallbackHi)
+
+        // Sample two independent random magnitudes from each interval (preserve randomness behavior)
+        fun sampleFromInterval(lo: Float, hi: Float): Float = if (hi <= lo) lo else Random.nextFloat() * (hi - lo) + lo
+
+        val yawRandA = sampleFromInterval(yawInterval.first, yawInterval.second)
+        val yawRandB = sampleFromInterval(yawInterval.first, yawInterval.second)
+        val pitchRandA = sampleFromInterval(pitchInterval.first, pitchInterval.second)
+        val pitchRandB = sampleFromInterval(pitchInterval.first, pitchInterval.second)
 
         val yawMin = -yawRandA + distCoef
         val yawMax = yawRandB + distCoef
@@ -136,25 +173,28 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         val pitchLo = min(pitchMin, pitchMax)
         val pitchHi = max(pitchMin, pitchMax)
 
-        // angle difference -> ensure Float for coerceIn
+        // angleDifference may return Double; force Float to keep types uniform
         val yawDiff = RotationUtil.angleDifference(diff.deltaYaw, prevDiff.deltaYaw).toFloat()
         val pitchDiff = RotationUtil.angleDifference(diff.deltaPitch, prevDiff.deltaPitch).toFloat()
 
-        // sample uniform in [lo, hi] by using kotlin.random (preserve randomness behavior)
-        fun sampleIn(lo: Float, hi: Float): Float = if (hi <= lo) lo else Random.nextFloat() * (hi - lo) + lo
+        // Sample inner bound for acceleration (keeps randomness and uses numeric bounds)
+        val yawAccelSampleLo = sampleFromInterval(yawLo, yawHi)
+        val yawAccelSampleHi = sampleFromInterval(yawLo, yawHi)
+        val pitchAccelSampleLo = sampleFromInterval(pitchLo, pitchHi)
+        val pitchAccelSampleHi = sampleFromInterval(pitchLo, pitchHi)
 
-        val yawAccel = yawDiff.coerceIn(sampleIn(yawLo, yawHi), sampleIn(yawLo, yawHi)) // sample to generate accel bounds
-        val pitchAccel = pitchDiff.coerceIn(sampleIn(pitchLo, pitchHi), sampleIn(pitchLo, pitchHi))
+        val yawAccel = yawDiff.coerceIn(min(yawAccelSampleLo, yawAccelSampleHi), max(yawAccelSampleLo, yawAccelSampleHi))
+        val pitchAccel = pitchDiff.coerceIn(min(pitchAccelSampleLo, pitchAccelSampleHi), max(pitchAccelSampleLo, pitchAccelSampleHi))
 
         // human-like jitter
         val jitterYaw = ((sin(System.nanoTime() * 1e-9 * 3.0) * 0.5) * humanJitter).toFloat()
         val jitterPitch = ((cos(System.nanoTime() * 1e-9 * 2.7) * 0.4) * humanJitter).toFloat()
 
-        // final step composition
+        // final step composition (all Float)
         var finalYaw = prevDiff.deltaYaw + yawAccel + predYawOffset + jitterYaw
         var finalPitch = prevDiff.deltaPitch + pitchAccel + predPitchOffset + jitterPitch
 
-        // clamp per-tick using coerceIn(min, max) overload (no range operator ambiguity)
+        // clamp per-tick using min/max coerceIn overload to avoid .. ambiguity
         val ms = maxStep
         finalYaw = finalYaw.coerceIn(-ms, ms)
         finalPitch = finalPitch.coerceIn(-ms, ms)
