@@ -18,12 +18,10 @@ import net.minecraft.util.math.MathHelper
 import kotlin.math.*
 import kotlin.random.Random
 
-// Sửa lỗi 1: Đổi tên lớp và tên trong constructor về lại "HumanHybrid"
 class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("HumanHybrid", parent) {
 
     // --- CÁC THÀNH PHẦN CỐT LÕI ---
     
-    // 1. Lấy từ HumanHybrid: Gia tốc cơ bản và ảnh hưởng khoảng cách
     private inner class BaseAcceleration : ToggleableConfigurable(this, "BaseAcceleration", true) {
         val baseYawAccel by floatRange("BaseYawAccel", 14f..22f, 1f..180f)
         val basePitchAccel by floatRange("BasePitchAccel", 12f..20f, 1f..180f)
@@ -31,20 +29,18 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         val crosshairBoost by floatRange("CrosshairBoost", 16f..22f, 1f..180f)
     }
 
-    // 2. Lấy từ Acceleration: Cơ chế giảm tốc khi gần mục tiêu -> Tăng tracking
     private inner class SigmoidDeceleration : ToggleableConfigurable(this, "SigmoidDeceleration", true) {
         val steepness by float("Steepness", 10f, 0.0f..20f)
         val midpoint by float("Midpoint", 0.3f, 0.0f..1.0f)
 
         fun computeFactor(rotationDifference: Float): Float {
             if (!enabled) return 1.0f
-            val scaledDifference = rotationDifference / 180f // Chuẩn hóa góc lệch
+            val scaledDifference = rotationDifference / 180f
             val sigmoid = 1 / (1 + exp((-steepness * (scaledDifference - midpoint)).toDouble()))
-            return sigmoid.toFloat().coerceIn(0.1f, 1.0f) // Đảm bảo không bao giờ dừng hẳn
+            return sigmoid.toFloat().coerceIn(0.1f, 1.0f)
         }
     }
 
-    // 3. Nâng cấp: Kết hợp Prediction và Jitter từ HumanHybrid vào một module riêng -> Tăng humanization
     private inner class Humanization : ToggleableConfigurable(this, "Humanization", true) {
         val predictionStrength by float("PredictionStrength", 0.25f, 0f..2f)
         val humanJitter by float("HumanJitter", 0.6f, 0f..5f)
@@ -52,11 +48,9 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         fun getOffsets(diff: RotationDelta): FloatFloatPair {
             if (!enabled) return FloatFloatPair.of(0f, 0f)
             
-            // Lấy logic Prediction từ HumanHybrid
             val predYawOffset = diff.deltaYaw * predictionStrength
             val predPitchOffset = diff.deltaPitch * predictionStrength
 
-            // Lấy logic Jitter (run lắc) từ HumanHybrid
             val jitterYaw = (sin(System.nanoTime() * 1e-9 * 3.0) * 0.5 * humanJitter).toFloat()
             val jitterPitch = (cos(System.nanoTime() * 1e-9 * 2.7) * 0.4 * humanJitter).toFloat()
 
@@ -82,8 +76,8 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         val entity = rotationTarget.entity
         val distance = entity?.let { player.boxedDistanceTo(it) } ?: 0.0
         
-        // Sửa lỗi 2: Thêm .toFloat() để ép kiểu kết quả của max() thành Float
-        val checkDistance = max(3.0, distance).toFloat()
+        // Sửa lỗi: Xóa .toFloat() để giữ lại kiểu Double cho hàm facingEnemy
+        val checkDistance = max(3.0, distance)
         val crosshair = entity?.let { facingEnemy(it, checkDistance, currentRotation) } == true
 
         val (yawStep, pitchStep) = computeTurnSpeed(prevDiff, diff, crosshair, distance)
@@ -104,7 +98,6 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         val (yawStep, pitchStep) = computeTurnSpeed(prevDiff, diff, false, 0.0)
         if (abs(yawStep) < 1e-6f && abs(pitchStep) < 1e-6f) return 0
 
-        // Cải tiến nhỏ: Đảm bảo các biến là Float để hàm max hoạt động nhất quán
         val ticksH = floor(abs(diff.deltaYaw) / abs(yawStep)).let { if (it.isNaN()) 0.0f else it.toFloat() }
         val ticksV = floor(abs(diff.deltaPitch) / abs(pitchStep)).let { if (it.isNaN()) 0.0f else it.toFloat() }
 
@@ -118,7 +111,6 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         crosshair: Boolean,
         distance: Double
     ): FloatFloatPair {
-        // --- BƯỚC 1: TÍNH TOÁN GIA TỐC CƠ BẢN (Lấy ý tưởng từ HumanHybrid) ---
         val distCoef = if (distance.isFinite()) {
             (baseAcceleration.distanceCoef * distance).toFloat()
         } else {
@@ -131,7 +123,6 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
 
         fun sample(range: ClosedFloatingPointRange<Float>): Float = Random.nextFloat() * (range.endInclusive - range.start) + range.start
         
-        // Tạo gia tốc bất đối xứng (đặc trưng của HumanHybrid)
         val yawRandA = sample(yawInterval)
         val yawRandB = sample(yawInterval)
         val pitchRandA = sample(pitchInterval)
@@ -146,19 +137,15 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         var finalYawAccel = neededYawAccel.coerceIn(yawAccelRange)
         var finalPitchAccel = neededPitchAccel.coerceIn(pitchAccelRange)
 
-        // --- BƯỚC 2: ÁP DỤNG GIẢM TỐC (Lấy từ Acceleration để tăng tracking) ---
         val decelerationFactor = sigmoidDeceleration.computeFactor(diff.length())
         finalYawAccel *= decelerationFactor
         finalPitchAccel *= decelerationFactor
 
-        // --- BƯỚC 3: THÊM CÁC YẾU TỐ "CON NGƯỜI" (Nâng cấp từ HumanHybrid) ---
         val (humanYawOffset, humanPitchOffset) = humanization.getOffsets(diff)
 
-        // --- BƯỚC 4: TỔNG HỢP KẾT QUẢ ---
         var yawStep = prevDiff.deltaYaw + finalYawAccel + humanYawOffset
         var pitchStep = prevDiff.deltaPitch + finalPitchAccel + humanPitchOffset
         
-        // Giới hạn tốc độ quay tối đa mỗi tick
         yawStep = MathHelper.wrapDegrees(yawStep).coerceIn(-maxStepDefault, maxStepDefault)
         pitchStep = pitchStep.coerceIn(-maxStepDefault, maxStepDefault)
         
