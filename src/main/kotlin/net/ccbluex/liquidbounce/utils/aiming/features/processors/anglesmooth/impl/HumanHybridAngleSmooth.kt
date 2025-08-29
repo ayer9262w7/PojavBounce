@@ -25,11 +25,9 @@ import kotlin.random.Random
  * (nguyên nhân compiler ambiguity với Number & Comparable<Nothing>).
  *
  * Giải pháp:
- * - Lấy giá trị min/max rõ ràng (nếu config là range-like) rồi sampling bằng kotlin.random.Random
- * - Ép kiểu Number -> Float khi cần
- * - Dùng coerceIn(min, max) để clamp (tránh ambiguity với operator ..)
- *
- * Mục tiêu: loại bỏ lỗi biên dịch và giữ nguyên logic feature.
+ * - Lấy giá trị numeric trực tiếp nếu là Number
+ * - Nếu không phải Number, thử parse từ toString()
+ * - Tránh mọi kiểm tra kiểu ClosedRange/ClosedFloatingPointRange để không gây ambiguity cho compiler
  */
 class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("HumanHybrid", parent) {
 
@@ -115,22 +113,13 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
 
         val distCoef = (dynamic.distanceCoef * distance).toFloat()
 
-        // Robust sampling helper: handle Number, ClosedFloatingPointRange<*>, ClosedRange<*>
+        // Robust sampling helper: avoid pattern-matching on ClosedRange to prevent compiler ambiguity.
         fun sampleFloatFromConfig(value: Any?, fallback: Float = 0f): Float {
-            return when (value) {
-                is Number -> value.toFloat()
-                is ClosedFloatingPointRange<*> -> {
-                    val lo = (value.start as Number).toFloat()
-                    val hi = (value.endInclusive as Number).toFloat()
-                    if (hi <= lo) lo else Random.nextFloat() * (hi - lo) + lo
-                }
-                is ClosedRange<*> -> { // generic ClosedRange (in case the config type uses Comparable)
-                    val lo = (value.start as Number).toFloat()
-                    val hi = (value.endInclusive as Number).toFloat()
-                    if (hi <= lo) lo else Random.nextFloat() * (hi - lo) + lo
-                }
-                else -> fallback
-            }
+            // If the delegate returns a Number, use it directly.
+            if (value is Number) return value.toFloat()
+            // Otherwise, try to parse numeric text representation as a last resort.
+            val s = value?.toString()
+            return s?.toFloatOrNull() ?: fallback
         }
 
         // Sample two random magnitudes to avoid relying on ambiguous extension random()
