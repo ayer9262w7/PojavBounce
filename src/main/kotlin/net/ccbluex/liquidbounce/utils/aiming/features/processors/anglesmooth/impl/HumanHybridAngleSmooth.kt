@@ -20,44 +20,29 @@ import kotlin.random.Random
 /**
  * HumanHybridAngleSmooth
  *
- * MỤC ĐÍCH CHỈNH SỬA: loại bỏ mọi biểu thức gây ambiguity kiểu liên quan tới
- * delegate config / range objects để build không lỗi trên CI.
+ * Bản vá: giữ declarations của delegate (float / floatRange) nhưng khi cần lấy min/ max
+ * sẽ dùng helper extractNumericInterval / extractNumericValue để trả về Pair<Float,Float> hoặc Float,
+ * tránh việc compiler suy ra kiểu chung không mong muốn khi kết hợp các delegate khác kiểu.
  *
- * Thay đổi chính:
- * - Không dùng trực tiếp các property khai báo bằng delegate (floatRange / float).
- * - Thay bằng các hằng số numeric mặc định (Float) cho khoảng baseYaw/basePitch/crosshairBoost.
- * - Giữ nguyên thuật toán: prediction, jitter, sampling, clamp, wrap.
- *
- * Ghi chú: để khôi phục đầy đủ tính cấu hình, ta cần API rõ ràng để đọc min/max từ delegate;
- * nếu bạn muốn, mình sẽ cập nhật để đọc đúng từ config API thay vì dùng hằng số.
+ * Mục tiêu: vẫn giữ khả năng cấu hình (config tree) trong UI nhưng biên dịch an toàn.
  */
 class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("HumanHybrid", parent) {
 
-    // --- Thay thế config-delegates bằng hằng số numeric (mặc định) ---
-    // Những giá trị này là DEFAULTS tương đương với range 14f..22f, 12f..20f, crosshair 16f..22f
-    // Nếu muốn dùng config, ta cần truy xuất API của delegate để lấy min/max.
-    private val baseYawAccelDefaultLo = 14f
-    private val baseYawAccelDefaultHi = 22f
+    // --- Config delegates (giữ nguyên để UI/config tree hoạt động) ---
+    private val baseYawAccel by floatRange("BaseYawAccel", 14f..22f, 1f..180f)
+    private val basePitchAccel by floatRange("BasePitchAccel", 12f..20f, 1f..180f)
 
-    private val basePitchAccelDefaultLo = 12f
-    private val basePitchAccelDefaultHi = 20f
-
-    private val crosshairBoostDefaultLo = 16f
-    private val crosshairBoostDefaultHi = 22f
-
-    // Prediction and jitter (kept configurable via delegates originally; here we keep defaults)
-    private val predictionStrengthDefault = 0.25f
-    private val humanJitterDefault = 0.6f
-    private val maxStepDefault = 10f
-
-    // Keep dynamic toggle structure so config tree remains compatible (but do not rely on its numeric types)
     private inner class Dynamic : ToggleableConfigurable(this, "Dynamic", true) {
-        // keep delegate definitions to preserve UI/config tree, but do not use them directly in code
         val distanceCoef by float("DistanceCoef", -1.0f, -5f..5f)
         val crosshairBoost by floatRange("CrosshairBoost", 16f..22f, 1f..180f)
     }
 
     private val dynamic = tree(Dynamic())
+
+    // Prediction and jitter defaults (if delegate values cannot be resolved)
+    private val predictionStrengthDefault = 0.25f
+    private val humanJitterDefault = 0.6f
+    private val maxStepDefault = 10f
 
     // EMA internal state (kept)
     private var emaYaw: Float? = null
@@ -66,7 +51,6 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
     private val emaInitWindow = 3
     private val emaAlpha = 0.28f
 
-    // Nếu bạn muốn, tôi có thể đổi các default này để đọc từ config bằng API (cần biết cách đọc min/max)
     override fun process(
         rotationTarget: RotationTarget,
         currentRotation: Rotation,
@@ -115,7 +99,7 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         crosshair: Boolean,
         distance: Double
     ): FloatFloatPair {
-        // prediction offsets (use defaults)
+        // prediction offsets
         val predictionStrength = predictionStrengthDefault
         val predYawOffset = diff.deltaYaw * predictionStrength
         val predPitchOffset = diff.deltaPitch * predictionStrength
@@ -123,15 +107,28 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         val humanJitter = humanJitterDefault
         val maxStep = maxStepDefault
 
-        val distCoef = (dynamic.distanceCoef * distance).toFloat()
-
-        // Choose numeric interval based on dynamic flag + crosshair (use defaults, not delegates)
-        val yawInterval = if (dynamic.enabled && crosshair) {
-            Pair(crosshairBoostDefaultLo, crosshairBoostDefaultHi)
-        } else {
-            Pair(baseYawAccelDefaultLo, baseYawAccelDefaultHi)
+        // distance coefficient: try extract numeric value from delegate, fallback to -1.0f
+        val distCoefSingle = try {
+            extractNumericValue(dynamic.distanceCoef, -1.0f)
+        } catch (_: Throwable) {
+            -1.0f
         }
-        val pitchInterval = Pair(basePitchAccelDefaultLo, basePitchAccelDefaultHi)
+        val distCoef = (distCoefSingle * distance).toFloat()
+
+        // Determine yaw interval numeric pair (lo, hi) using delegates but extracted safely
+        val baseYawFallbackLo = 14f
+        val baseYawFallbackHi = 22f
+        val basePitchFallbackLo = 12f
+        val basePitchFallbackHi = 20f
+        val crosshairFallbackLo = 16f
+        val crosshairFallbackHi = 22f
+
+        val yawInterval = if (dynamic.enabled && crosshair) {
+            extractNumericInterval(dynamic.crosshairBoost, crosshairFallbackLo, crosshairFallbackHi)
+        } else {
+            extractNumericInterval(baseYawAccel, baseYawFallbackLo, baseYawFallbackHi)
+        }
+        val pitchInterval = extractNumericInterval(basePitchAccel, basePitchFallbackLo, basePitchFallbackHi)
 
         // Utility: sample float from [lo, hi]
         fun sample(lo: Float, hi: Float): Float = if (hi <= lo) lo else Random.nextFloat() * (hi - lo) + lo
@@ -173,7 +170,7 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         var finalYaw = prevDiff.deltaYaw + yawAccel + predYawOffset + jitterYaw
         var finalPitch = prevDiff.deltaPitch + pitchAccel + predPitchOffset + jitterPitch
 
-        // clamp per-tick using coerceIn(min, max) overload (avoid .. ambiguity)
+        // clamp per-tick using coerceIn(min, max)
         finalYaw = finalYaw.coerceIn(-maxStep, maxStep)
         finalPitch = finalPitch.coerceIn(-maxStep, maxStep)
 
@@ -189,5 +186,112 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         while (x <= -180f) x += 360f
         while (x > 180f) x -= 360f
         return x
+    }
+
+    companion object {
+        // Helper: trả Pair(lo, hi) từ nhiều kiểu delegate/object khác nhau
+        // Nếu không thể trích xuất sẽ trả fallbackLo..fallbackHi
+        private fun extractNumericInterval(value: Any?, fallbackLo: Float, fallbackHi: Float): Pair<Float, Float> {
+            if (value == null) return Pair(fallbackLo, fallbackHi)
+
+            // 1) If Number -> single value
+            if (value is Number) {
+                val v = value.toFloat()
+                return Pair(min(v, v), max(v, v))
+            }
+
+            try {
+                val clazz = value.javaClass
+
+                // try common range properties: start / endInclusive / end / to
+                val startCandidate = try { clazz.getMethod("getStart").invoke(value) } catch (_: Throwable) { null }
+                    ?: try { clazz.getMethod("start").invoke(value) } catch (_: Throwable) { null }
+                    ?: try { clazz.getField("start").get(value) } catch (_: Throwable) { null }
+
+                val endCandidate = try { clazz.getMethod("getEndInclusive").invoke(value) } catch (_: Throwable) { null }
+                    ?: try { clazz.getMethod("endInclusive").invoke(value) } catch (_: Throwable) { null }
+                    ?: try { clazz.getField("endInclusive").get(value) } catch (_: Throwable) { null }
+                    ?: try { clazz.getMethod("getEnd").invoke(value) } catch (_: Throwable) { null }
+                    ?: try { clazz.getMethod("end").invoke(value) } catch (_: Throwable) { null }
+                    ?: try { clazz.getField("end").get(value) } catch (_: Throwable) { null }
+                    ?: try { clazz.getMethod("getTo").invoke(value) } catch (_: Throwable) { null }
+                    ?: try { clazz.getField("to").get(value) } catch (_: Throwable) { null }
+
+                val startNum = startCandidate as? Number
+                val endNum = endCandidate as? Number
+                if (startNum != null && endNum != null) {
+                    val lo = startNum.toFloat()
+                    val hi = endNum.toFloat()
+                    return Pair(min(lo, hi), max(lo, hi))
+                }
+
+                // try names min/max/from/to/first/last/value
+                val tryNames = listOf(
+                    "min", "max", "minimum", "maximum",
+                    "lower", "upper",
+                    "from", "to",
+                    "first", "last",
+                    "value", "v"
+                )
+                var foundLo: Float? = null
+                var foundHi: Float? = null
+                for (ln in tryNames) {
+                    if (foundLo == null) {
+                        val f = try { clazz.getMethod(ln).invoke(value) } catch (_: Throwable) { null }
+                            ?: try { clazz.getMethod("get${ln.replaceFirstChar { it.uppercaseChar() }}").invoke(value) } catch (_: Throwable) { null }
+                            ?: try { clazz.getField(ln).get(value) } catch (_: Throwable) { null }
+                        if (f is Number) foundLo = f.toFloat()
+                    }
+                    if (foundHi == null) {
+                        val h = try { clazz.getMethod(ln).invoke(value) } catch (_: Throwable) { null }
+                            ?: try { clazz.getMethod("get${ln.replaceFirstChar { it.uppercaseChar() }}").invoke(value) } catch (_: Throwable) { null }
+                            ?: try { clazz.getField(ln).get(value) } catch (_: Throwable) { null }
+                        if (h is Number) foundHi = h.toFloat()
+                    }
+                    if (foundLo != null && foundHi != null) break
+                }
+                if (foundLo != null && foundHi != null) {
+                    return Pair(min(foundLo, foundHi), max(foundLo, foundHi))
+                }
+            } catch (_: Throwable) {
+                // ignore and fallback to parsing string form
+            }
+
+            // Fallback: parse numbers from toString()
+            val s = value.toString()
+            val regex = """-?\d+(?:\.\d+)?""".toRegex()
+            val nums = regex.findAll(s).mapNotNull { it.value.toFloatOrNull() }.toList()
+            return when {
+                nums.size >= 2 -> {
+                    val lo = min(nums[0], nums[1])
+                    val hi = max(nums[0], nums[1])
+                    Pair(lo, hi)
+                }
+                nums.size == 1 -> Pair(nums[0], nums[0])
+                else -> Pair(fallbackLo, fallbackHi)
+            }
+        }
+
+        // Helper: trả 1 Float từ nhiều kiểu (Number, delegated float, etc.), fallback nếu không có
+        private fun extractNumericValue(value: Any?, fallback: Float): Float {
+            if (value == null) return fallback
+            if (value is Number) return value.toFloat()
+            try {
+                val clazz = value.javaClass
+                val fieldNames = listOf("value", "v", "min", "max", "from", "to", "start", "end", "endInclusive")
+                for (n in fieldNames) {
+                    val candidate = try { clazz.getMethod(n).invoke(value) } catch (_: Throwable) { null }
+                        ?: try { clazz.getMethod("get${n.replaceFirstChar { it.uppercaseChar() }}").invoke(value) } catch (_: Throwable) { null }
+                        ?: try { clazz.getField(n).get(value) } catch (_: Throwable) { null }
+                    if (candidate is Number) return candidate.toFloat()
+                }
+            } catch (_: Throwable) {
+                // ignore
+            }
+            // fallback to parse
+            val s = value.toString()
+            val first = """-?\d+(?:\.\d+)?""".toRegex().find(s)?.value
+            return first?.toFloatOrNull() ?: fallback
+        }
     }
 }
