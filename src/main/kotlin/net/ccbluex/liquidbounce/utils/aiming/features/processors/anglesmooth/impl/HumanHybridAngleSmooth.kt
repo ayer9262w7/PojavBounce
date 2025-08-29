@@ -29,12 +29,12 @@ import kotlin.random.Random
 class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("HumanHybrid", parent) {
 
     // --- Config delegates (giữ nguyên để UI/config tree hoạt động) ---
-    private val baseYawAccel by floatRange("BaseYawAccel", 14f..22f, 1f..180f)
-    private val basePitchAccel by floatRange("BasePitchAccel", 12f..20f, 1f..180f)
+    private val baseYawAccel = floatRange("BaseYawAccel", 14f..22f, 1f..180f)
+    private val basePitchAccel = floatRange("BasePitchAccel", 12f..20f, 1f..180f)
 
     private inner class Dynamic : ToggleableConfigurable(this, "Dynamic", true) {
-        val distanceCoef by float("DistanceCoef", -1.0f, -5f..5f)
-        val crosshairBoost by floatRange("CrosshairBoost", 16f..22f, 1f..180f)
+        val distanceCoef = float("DistanceCoef", -1.0f, -5f..5f)
+        val crosshairBoost = floatRange("CrosshairBoost", 16f..22f, 1f..180f)
     }
 
     private val dynamic = tree(Dynamic())
