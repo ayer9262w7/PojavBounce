@@ -28,7 +28,7 @@ import kotlin.random.Random
  */
 class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("HumanHybrid", parent) {
 
-    // --- Config delegates (giữ nguyên để UI/config tree hoạt động) ---
+    // --- Config delegates (Sửa lỗi: Bỏ 'by', gán trực tiếp đối tượng config) ---
     private val baseYawAccel = floatRange("BaseYawAccel", 14f..22f, 1f..180f)
     private val basePitchAccel = floatRange("BasePitchAccel", 12f..20f, 1f..180f)
 
@@ -107,13 +107,19 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         val humanJitter = humanJitterDefault
         val maxStep = maxStepDefault
 
-        // distance coefficient: try extract numeric value from delegate, fallback to -1.0f
+        // Sửa lỗi: Gọi hàm từ Companion object để tránh xung đột tên
         val distCoefSingle = try {
-            extractNumericValue(dynamic.distanceCoef, -1.0f)
+            Companion.extractNumericValue(dynamic.distanceCoef, -1.0f)
         } catch (_: Throwable) {
             -1.0f
         }
-        val distCoef = (distCoefSingle * distance).toFloat()
+        
+        // Cải tiến: Xử lý các trường hợp distance là NaN hoặc Infinity để tránh lỗi runtime
+        val distCoef = if (distance.isFinite()) {
+            (distCoefSingle * distance).toFloat()
+        } else {
+            0f // Giá trị mặc định an toàn
+        }
 
         // Determine yaw interval numeric pair (lo, hi) using delegates but extracted safely
         val baseYawFallbackLo = 14f
@@ -123,12 +129,13 @@ class HumanHybridAngleSmooth(parent: ChoiceConfigurable<*>) : AngleSmooth("Human
         val crosshairFallbackLo = 16f
         val crosshairFallbackHi = 22f
 
+        // Sửa lỗi: Gọi hàm từ Companion object để tránh xung đột tên
         val yawInterval = if (dynamic.enabled && crosshair) {
-            extractNumericInterval(dynamic.crosshairBoost, crosshairFallbackLo, crosshairFallbackHi)
+            Companion.extractNumericInterval(dynamic.crosshairBoost, crosshairFallbackLo, crosshairFallbackHi)
         } else {
-            extractNumericInterval(baseYawAccel, baseYawFallbackLo, baseYawFallbackHi)
+            Companion.extractNumericInterval(baseYawAccel, baseYawFallbackLo, baseYawFallbackHi)
         }
-        val pitchInterval = extractNumericInterval(basePitchAccel, basePitchFallbackLo, basePitchFallbackHi)
+        val pitchInterval = Companion.extractNumericInterval(basePitchAccel, basePitchFallbackLo, basePitchFallbackHi)
 
         // Utility: sample float from [lo, hi]
         fun sample(lo: Float, hi: Float): Float = if (hi <= lo) lo else Random.nextFloat() * (hi - lo) + lo
