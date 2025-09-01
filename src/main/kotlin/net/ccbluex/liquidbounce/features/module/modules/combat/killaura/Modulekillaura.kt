@@ -955,6 +955,25 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
      * FIXED: Added rotation speed limits to prevent spinning
      */
     private fun createNonLinearPath(from: Rotation, to: Rotation, steps: Int): List<Rotation> {
+    val path = mutableListOf<Rotation>()
+    val limitedTo = applyRotationSpeedLimits(from, to)
+
+    for (i in 0 until steps) {
+        val t = i.toFloat() / steps
+        val ease = if (t < 0.5) 2 * t * t else -1 + (4 - 2 * t) * t
+
+        val rawYaw = from.yaw + getSmallestAngleDifference(from.yaw, limitedTo.yaw) * ease
+        val pitch = from.pitch + (limitedTo.pitch - from.pitch) * ease
+
+        // Thêm jitter nhỏ để tự nhiên hơn
+        val microJitterYaw = (Random.nextDouble() * 0.1 - 0.05).toFloat() * humanizationFactor
+        val microJitterPitch = (Random.nextDouble() * 0.1 - 0.05).toFloat() * humanizationFactor
+
+        path.add(Rotation(rawYaw + microJitterYaw, (pitch + microJitterPitch).coerceIn(-90f, 90f)).normalize())
+    }
+
+    return path
+}
         val path = mutableListOf<Rotation>()
         
         // Apply rotation speed limits to prevent spinning
@@ -992,6 +1011,23 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
      * This is the key fix for the 360° rotation issue
      */
     private fun applyRotationSpeedLimits(from: Rotation, to: Rotation): Rotation {
+    var deltaYaw = getSmallestAngleDifference(from.yaw, to.yaw)
+    val deltaPitch = to.pitch - from.pitch
+
+    val elapsedTime = (System.currentTimeMillis() - lastRotationTime).coerceAtLeast(1) / 1000f
+    lastRotationTime = System.currentTimeMillis()
+
+    val maxYawChange = maxYawRotationSpeed * elapsedTime * 0.5f
+    val maxPitchChange = maxPitchRotationSpeed * elapsedTime * 0.5f
+
+    deltaYaw = deltaYaw.coerceIn(-maxYawChange, maxYawChange)
+    val limitedPitch = deltaPitch.coerceIn(-maxPitchChange, maxPitchChange)
+
+    val newYaw = from.yaw + deltaYaw
+    val newPitch = (from.pitch + limitedPitch).coerceIn(-90f, 90f)
+
+    return Rotation(newYaw, newPitch)
+}
         // Calculate the shortest yaw delta (prevents spinning)
         var deltaYaw = getSmallestAngleDifference(from.yaw, to.yaw)
         val deltaPitch = to.pitch - from.pitch
@@ -1058,6 +1094,18 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
      * FIXED: Ensures we always take the shortest path to avoid spinning
      */
     private fun getHumanizedShortestAngle(current: Float, target: Float): Float {
+    var delta = getSmallestAngleDifference(current, target)
+
+    // Giới hạn tốc độ quay cơ bản
+    val maxRotation = maxYawRotationSpeed * 0.1f
+    delta = delta.coerceIn(-maxRotation, maxRotation)
+
+    // Random hóa phụ thuộc độ lớn delta (giữ tự nhiên)
+    val slipScale = if (abs(delta) < 5f) 1.5f else 0.5f
+    val randomization = (Random.nextDouble() * 0.02 - 0.01).toFloat() * humanizationFactor * slipScale
+
+    return current + delta + randomization
+}
         // Calculate the smallest angle difference to avoid spinning
         val delta = getSmallestAngleDifference(current, target)
         
