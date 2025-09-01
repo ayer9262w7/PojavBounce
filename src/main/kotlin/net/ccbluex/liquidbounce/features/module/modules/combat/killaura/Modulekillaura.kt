@@ -140,9 +140,9 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                 if (size > maxHistorySize) removeAt(0)
             }
         }
-        
+
         fun getHistory(uuid: String): List<MovementSnapshot> = entityHistory[uuid] ?: emptyList()
-        
+
         fun clearOldEntries() {
             val currentTime = System.currentTimeMillis()
             entityHistory.entries.removeIf { (_, snapshots) ->
@@ -155,7 +155,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         private val successRateByBehavior = mutableMapOf<Int, Pair<Int, Int>>()
         private val playerCombatHistory = mutableMapOf<String, MutableList<Boolean>>() // UUID to success/fail history
         private val lastAttackAngles = mutableMapOf<String, List<Float>>() // Store recent attack angles for analysis
-        
+
         // Track player's combat experience level (0.0-1.0)
         private var playerCombatExperience = 0.3f
         private val combatExperienceHistory = mutableListOf<Float>()
@@ -163,17 +163,17 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
         suspend fun learnFromResult(target: Entity, success: Boolean) {
             if (target !is PlayerEntity) return
-            
+
             // Update player combat experience
             updateCombatExperience(success)
-            
+
             // Track this result for the specific target
             val uuid = target.uuidAsString
             playerCombatHistory.getOrPut(uuid) { mutableListOf() }.apply {
                 add(success)
                 if (size > 20) removeAt(0) // Keep last 20 interactions
             }
-            
+
             // Analyze behavior and update success rates
             val profile = analyzePlayerBehavior(target)
             val profileHash = profile.hashCode()
@@ -182,18 +182,18 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             val newAttempts = currentAttempts + 1
             successRateByBehavior[profileHash] = Pair(newSuccesses, newAttempts)
         }
-        
+
         private fun updateCombatExperience(success: Boolean) {
             // Update combat experience based on success/failure
             val experienceChange = if (success) 0.01f else -0.005f
             playerCombatExperience = (playerCombatExperience + experienceChange).coerceIn(0.1f, 0.95f)
-            
+
             // Add to history
             combatExperienceHistory.add(playerCombatExperience)
             if (combatExperienceHistory.size > maxHistorySize) {
                 combatExperienceHistory.removeAt(0)
             }
-            
+
             // Smooth experience over time
             if (combatExperienceHistory.size > 10) {
                 playerCombatExperience = combatExperienceHistory.takeLast(10).average().toFloat()
@@ -203,33 +203,33 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         suspend fun analyzePlayerBehavior(player: PlayerEntity): BehaviorProfile {
             val history = movementTracker.getHistory(player.uuidAsString)
             if (history.size < 5) return BehaviorProfile.DEFAULT
-            
+
             // Calculate basic metrics
             val avgDistance = history.map { it.pos.distanceTo(ModuleKillAura.player.pos) }.average()
             val turningRate = calculateTurningRate(history.map { it.pos })
-            val closingRate = (history.first().pos.distanceTo(ModuleKillAura.player.pos) - 
-                              history.last().pos.distanceTo(ModuleKillAura.player.pos)) / history.size
-            
+            val closingRate = (history.first().pos.distanceTo(ModuleKillAura.player.pos) -
+                    history.last().pos.distanceTo(ModuleKillAura.player.pos)) / history.size
+
             // Calculate acceleration and jerk (rate of change of acceleration)
             val accelerations = calculateAccelerations(history)
             val jerks = calculateJerks(accelerations)
-            
+
             // Calculate rhythm and pattern metrics
             val movementRhythm = analyzeMovementRhythm(history)
             val directionChanges = countDirectionChanges(history)
-            
+
             // Calculate movement variability
             val variability = calculateMovementVariability(history, accelerations, jerks)
-            
+
             // Determine movement style with more nuance
             val movementStyle = determineDetailedMovementStyle(
-                turningRate, avgDistance, closingRate, 
+                turningRate, avgDistance, closingRate,
                 accelerations, jerks, movementRhythm, directionChanges
             )
-            
+
             // Calculate aggressiveness
             val aggressiveness = calculateAggressiveness(closingRate, directionChanges, history)
-            
+
             return BehaviorProfile(
                 aggressiveness = aggressiveness,
                 movementStyle = movementStyle,
@@ -237,10 +237,10 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                 variability = variability
             )
         }
-        
+
         private fun calculateAccelerations(history: List<MovementSnapshot>): List<Double> {
             if (history.size < 3) return emptyList()
-            
+
             return history.zipWithNext { a, b ->
                 val dt = (b.timestamp - a.timestamp) / 1000.0 // time in seconds
                 if (dt > 0) {
@@ -251,56 +251,56 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                 }
             }
         }
-        
+
         private fun calculateJerks(accelerations: List<Double>): List<Double> {
             if (accelerations.size < 2) return emptyList()
-            
+
             return accelerations.zipWithNext { a, b -> b - a }
         }
-        
+
         private fun analyzeMovementRhythm(history: List<MovementSnapshot>): Float {
             if (history.size < 4) return 0.5f
-            
+
             val timeDeltas = history.zipWithNext { a, b -> b.timestamp - a.timestamp }
             val avgDelta = timeDeltas.average()
             val variance = timeDeltas.map { (it - avgDelta).pow(2) }.average()
-            
+
             // Normalize to 0-1 range where 0 is perfectly rhythmic and 1 is completely arrhythmic
             return (variance / (avgDelta * avgDelta)).toFloat().coerceIn(0f, 1f)
         }
-        
+
         private fun countDirectionChanges(history: List<MovementSnapshot>): Int {
             if (history.size < 3) return 0
-            
+
             var changes = 0
             for (i in 1 until history.size - 1) {
-                val prev = history[i-1].pos.subtract(history[i].pos).normalize()
-                val next = history[i+1].pos.subtract(history[i].pos).normalize()
-                
+                val prev = history[i - 1].pos.subtract(history[i].pos).normalize()
+                val next = history[i + 1].pos.subtract(history[i].pos).normalize()
+
                 // If dot product is negative, direction changed significantly
                 if (prev.dotProduct(next) < 0) {
                     changes++
                 }
             }
-            
+
             return changes
         }
-        
+
         private fun calculateAggressiveness(closingRate: Double, directionChanges: Int, history: List<MovementSnapshot>): Float {
             // Base aggressiveness on closing rate
             val baseAggressiveness = (closingRate * 5).toFloat().coerceIn(0.0f, 1.0f)
-            
+
             // Adjust based on direction changes (more changes = more defensive/evasive)
             val directionFactor = max(0f, 1f - (directionChanges / 10f))
-            
+
             // Consider if the player is actively approaching
             val isApproaching = closingRate > 0.05
-            
+
             // Calculate final aggressiveness with some randomness
             return (baseAggressiveness * 0.6f + directionFactor * 0.4f) * (if (isApproaching) 1.2f else 0.8f)
                 .coerceIn(0.1f, 0.9f)
         }
-        
+
         private fun determineDetailedMovementStyle(
             turningRate: Float,
             avgDistance: Double,
@@ -312,13 +312,13 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         ): MovementStyle {
             // Calculate style scores with some randomness to avoid perfect classification
             val randomFactor = Random.nextDouble(-0.1, 0.1)
-            
+
             val circleScore = turningRate * 2.5 + (if (avgDistance < 4.0) 0.3 else 0.0) + rhythm * 0.2
-            val aggressiveScore = closingRate * 5 + 
-                                 (if (accelerations.isNotEmpty()) accelerations.average() * 2 else 0.0) + 
-                                 (if (jerks.isNotEmpty()) jerks.average() else 0.0)
+            val aggressiveScore = closingRate * 5 +
+                    (if (accelerations.isNotEmpty()) accelerations.average() * 2 else 0.0) +
+                    (if (jerks.isNotEmpty()) jerks.average() else 0.0)
             val defensiveScore = -closingRate * 4 + directionChanges * 0.05
-            
+
             // Determine style based on highest score
             return when {
                 circleScore > 0.4 + randomFactor -> MovementStyle.CIRCLE_STRAFE
@@ -327,18 +327,18 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                 else -> MovementStyle.NORMAL
             }
         }
-        
+
         private fun calculateMovementVariability(
             history: List<MovementSnapshot>,
             accelerations: List<Double>,
             jerks: List<Double>
         ): Float {
             if (history.size < 3) return 0.5f
-            
+
             // Calculate position variability
             val positions = history.map { it.pos }
             val posVariance = calculateSpatialVariance(positions)
-            
+
             // Calculate timing variability
             val timestamps = history.map { it.timestamp }
             val timeDeltas = timestamps.zipWithNext { a, b -> b - a }
@@ -348,7 +348,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             } else {
                 0.0
             }
-            
+
             // Calculate acceleration variability
             val accelVariance = if (accelerations.isNotEmpty()) {
                 val avg = accelerations.average().absoluteValue.coerceAtLeast(0.01)
@@ -356,7 +356,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             } else {
                 0.0
             }
-            
+
             // Calculate jerk variability
             val jerkVariance = if (jerks.isNotEmpty()) {
                 val avg = jerks.average().absoluteValue.coerceAtLeast(0.01)
@@ -364,26 +364,26 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             } else {
                 0.0
             }
-            
+
             // Combine metrics with weights
             return (posVariance * 0.4 + timeVariance * 0.2 + accelVariance * 0.2 + jerkVariance * 0.2)
                 .toFloat()
                 .coerceIn(0.1f, 1.0f)
         }
-        
+
         private fun calculateSpatialVariance(positions: List<Vec3d>): Double {
             if (positions.size < 2) return 0.0
-            
+
             // Calculate centroid
             val centroid = Vec3d(
                 positions.map { it.x }.average(),
                 positions.map { it.y }.average(),
                 positions.map { it.z }.average()
             )
-            
+
             // Calculate average distance from centroid
             val avgDistance = positions.map { it.distanceTo(centroid) }.average()
-            
+
             // Calculate variance
             return positions.map { (it.distanceTo(centroid) - avgDistance).pow(2) }.average()
         }
@@ -401,22 +401,46 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             }
             return if (angles.isNotEmpty()) (angles.average() / Math.PI).toFloat() else 0f
         }
-        
+
         fun getCombatExperience(): Float {
             return playerCombatExperience
+        }
+
+        // Provide an adaptive threat scoring helper used by the predictor.
+        // Keeps implementation lightweight and deterministic so it won't cause further errors.
+        suspend fun calculateAdaptiveThreatScore(enemy: LivingEntity, baseScore: Float): Float {
+            // If enemy is a player and we have history, adjust slightly.
+            val adjustment = if (enemy is PlayerEntity) {
+                val profile = analyzePlayerBehavior(enemy)
+                val hash = profile.hashCode()
+                val (suc, att) = successRateByBehavior.getOrDefault(hash, Pair(0, 0))
+                if (att <= 0) 1.0f else {
+                    val rate = suc.toFloat() / att.toFloat()
+                    // If historically we succeed, increase priority slightly; otherwise decrease.
+                    1.0f + (rate - 0.5f) * 0.3f
+                }
+            } else {
+                1.0f
+            }
+
+            return baseScore * adjustment
         }
     }
 
     object KillAuraAIPredictor {
         private val recentPredictions = mutableMapOf<String, List<Vec3d>>()
         private val predictionAccuracy = mutableMapOf<String, Float>()
-        
+
         suspend fun getOptimalTarget(context: CombatAIContext): LivingEntity? {
             if (context.nearbyEnemies.isEmpty()) return null
-            
+
             val targetScores = context.nearbyEnemies.map { enemy ->
                 val baseScore = calculateBaseThreatScore(enemy, context)
-                val adaptiveScore = KillAuraLearningSystem.calculateAdaptiveThreatScore(enemy, baseScore)
+                val adaptiveScore = try {
+                    KillAuraLearningSystem.calculateAdaptiveThreatScore(enemy, baseScore)
+                } catch (e: Exception) {
+                    baseScore
+                }
                 enemy to adaptiveScore
             }.sortedByDescending { it.second }
 
@@ -424,7 +448,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             // Less experienced players are more likely to pick suboptimal targets
             val experienceFactor = context.playerCombatExperience
             val random = Math.random()
-            
+
             return when {
                 // Experienced players pick optimal target most of the time
                 random < 0.7 * experienceFactor && targetScores.isNotEmpty() -> targetScores[0].first
@@ -440,76 +464,76 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         private fun calculateBaseThreatScore(enemy: LivingEntity, context: CombatAIContext): Float {
             val distance = ModuleKillAura.player.distanceTo(enemy)
             val distanceScore = (6f - distance.coerceIn(0f, 6f)) / 6f * 0.4f
-            
+
             // Health-based scoring
             val healthScore = (1f - (enemy.health / enemy.maxHealth)) * 0.3f
-            
+
             // Armor-based scoring
             val armorScore = (20f - enemy.armor) / 20f * 0.1f
-            
+
             // Behavior-based scoring
             val isApproaching = isEntityApproaching(enemy)
             val behaviorScore = if (isApproaching) 0.2f else 0.0f
-            
+
             // Context-aware adjustments
             val playerHealthRatio = context.playerHealth / ModuleKillAura.player.maxHealth
             val defensiveMultiplier = if (playerHealthRatio < 0.4f) 0.8f else 1.0f
-            
+
             // Add some randomness to make targeting less predictable
             val randomFactor = (0.95f + Random.nextFloat() * 0.1f)
-            
+
             return (distanceScore + healthScore + armorScore + behaviorScore) * defensiveMultiplier * randomFactor
         }
 
         suspend fun predictTargetPosition(target: Entity, ticksAhead: Int): Vec3d {
             // Get movement history
             val history = ModuleKillAura.movementTracker.getHistory(target.uuidAsString)
-            
+
             // If we don't have enough history, use simple prediction
             if (history.size < 3) {
                 return target.pos.add(target.velocity.multiply(ticksAhead.toDouble()))
             }
-            
+
             // Calculate acceleration
             val lastVelocity = history.last().velocity
             val prevVelocity = history[history.size - 2].velocity
             val acceleration = lastVelocity.subtract(prevVelocity)
-            
+
             // Use more sophisticated prediction with acceleration
             val predictedVelocity = lastVelocity.add(acceleration.multiply(0.5)) // Dampen acceleration effect
             val extrapolatedPos = target.pos.add(predictedVelocity.multiply(ticksAhead.toDouble()))
-            
+
             // Apply gravity if entity is not on ground
             val gravityAdjustedPos = if (!target.isOnGround) {
                 extrapolatedPos.add(0.0, -0.04 * ticksAhead * ticksAhead, 0.0)
             } else {
                 extrapolatedPos
             }
-            
+
             // Store prediction for accuracy tracking
             val uuid = target.uuidAsString
             recentPredictions[uuid] = (recentPredictions[uuid] ?: listOf()) + gravityAdjustedPos
             if ((recentPredictions[uuid]?.size ?: 0) > 10) {
                 recentPredictions[uuid] = recentPredictions[uuid]?.drop(1) ?: listOf()
             }
-            
+
             return gravityAdjustedPos
         }
-        
+
         fun updatePredictionAccuracy(entity: Entity) {
             val uuid = entity.uuidAsString
             val predictions = recentPredictions[uuid] ?: return
             if (predictions.isEmpty()) return
-            
+
             // Calculate accuracy of oldest prediction
             val oldestPrediction = predictions.first()
             val actualPosition = entity.pos
             val distance = oldestPrediction.distanceTo(actualPosition)
-            
+
             // Update accuracy metric (lower distance = higher accuracy)
             val accuracy = (1.0f / (1.0f + distance)).coerceIn(0.0f, 1.0f)
             predictionAccuracy[uuid] = (predictionAccuracy[uuid] ?: 0.5f) * 0.8f + accuracy * 0.2f
-            
+
             // Remove the oldest prediction
             if (predictions.size > 1) {
                 recentPredictions[uuid] = predictions.drop(1)
@@ -528,22 +552,22 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     val movementTracker = MovementHistoryTracker()
     private val learningEnabled by boolean("LearningEnabled", true)
     private val humanizationFactor by float("Humanization", 0.8f, 0.1f..1.0f)
-    
+
     // Anti-spin settings
     private val maxYawRotationSpeed by float("MaxYawSpeed", 40f, 10f..180f)
     private val maxPitchRotationSpeed by float("MaxPitchSpeed", 30f, 10f..90f)
     private val rotationSmoothness by float("RotationSmoothness", 0.7f, 0.1f..1.0f)
-    
+
     private val aiScope = CoroutineScope(Job() + Dispatchers.Default)
     private var combatStartTime = 0L
-    
+
     // Track previous rotations to prevent spinning
     private var lastRotation: Rotation? = null
     private var lastRotationTime = 0L
     // =============================
 
     val clickScheduler = tree(KillAuraClicker)
-    
+
     internal val range by float("Range", 3.2f, 1f..6f)
     internal val wallRange by float("WallRange", 2.8f, 0f..6f).onChange { newValue ->
         // onChange expected to return the effective Float value; clamp to range if needed.
@@ -561,11 +585,11 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     // Intentional miss settings
     private val enableIntentionalMisses by boolean("EnableMisses", true)
     private val baseMissChance by float("BaseMissChance", 0.02f, 0.0f..0.1f)
-    
+
     // Variable CPS settings
     private val enableVariableCPS by boolean("VariableCPS", true)
     private val cpsVariability by float("CPSVariability", 0.2f, 0.0f..0.5f)
-    
+
     // Target switching settings
     private val targetSwitchDelay by int("SwitchDelay", 400, 0..1000, "ms")
     private val targetSwitchRandomization by float("SwitchRandomization", 0.3f, 0.0f..1.0f)
@@ -660,7 +684,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         world.entities.filterIsInstance<LivingEntity>().forEach { entity ->
             movementTracker.updateEntityHistory(entity)
         }
-        
+
         // Periodically clean up old entries
         if (Random.nextInt(100) == 0) { // ~1% chance each tick
             movementTracker.clearOldEntries()
@@ -708,7 +732,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         } else {
             null
         }
-        
+
         val finalTarget = aiOptimalTarget ?: target
 
         // Update prediction accuracy for AI
@@ -726,20 +750,20 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             val targetUuid = finalTarget.uuidAsString
             val lastSwitchTime = lastTargetSwitchTime[targetUuid] ?: 0L
             val switchDelayWithRandomization = (targetSwitchDelay * (1.0 - targetSwitchRandomization * (Random.nextDouble() * 2 - 1))).toLong()
-            
+
             if (currentTime - lastSwitchTime < switchDelayWithRandomization) {
                 // Not enough time has passed, keep current target
                 finalTarget
             } else {
                 // Time to potentially switch targets
                 lastTargetSwitchTime[targetUuid] = currentTime
-                
+
                 // Perform raycast with humanization
                 val raycastTarget = when {
                     raycast != TRACE_NONE -> {
                         // Apply humanized rotation for raycast
                         val humanizedRotation = humanizeRotation(rotation)
-                        
+
                         raytraceEntity(range.toDouble(), humanizedRotation, filter = {
                             when (raycast) {
                                 TRACE_ONLYENEMY -> it.shouldBeAttacked()
@@ -785,7 +809,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     @Suppress("unused")
     private val sprintHandler = handler<SprintEvent> { event ->
         if (shouldBlockSprinting && (event.source == SprintEvent.Source.MOVEMENT_TICK ||
-                event.source == SprintEvent.Source.INPUT)) {
+                    event.source == SprintEvent.Source.INPUT)) {
             event.sprint = false
         }
     }
@@ -827,12 +851,12 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         // ===== IMPROVED ATTACK TIMING =====
         // Determine if we should intentionally miss
         val shouldMiss = enableIntentionalMisses && shouldIntentionallyMiss(target)
-        
+
         // Apply variable CPS if enabled
         if (enableVariableCPS) {
             applyVariableCPS()
         }
-        
+
         if (clickScheduler.isClickTick && validateAttack(target) && !shouldMiss) {
             clickScheduler.attack(sequence, rotation) {
                 if (!validateAttack(target)) {
@@ -879,186 +903,132 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     }
 
     // ===== NEW HUMANIZATION METHODS =====
-    
+
     /**
      * Humanizes rotation by adding micro-randomization and occasional larger adjustments
      */
     private fun humanizeRotation(rotation: Rotation): Rotation {
         val factor = humanizationFactor
-        
+
         // Add small random variations that mimic human hand movements
         val humanYaw = rotation.yaw + (Random.nextDouble() * 0.3 - 0.15).toFloat() * factor
         val humanPitch = rotation.pitch + (Random.nextDouble() * 0.2 - 0.1).toFloat() * factor
-        
+
         // Occasionally add larger adjustments to simulate hand slips
         val slipChance = 0.02 * factor // 2% chance, scaled by humanization factor
         val yawSlip = if (Random.nextDouble() < slipChance) (Random.nextDouble() * 1.5 - 0.75).toFloat() else 0f
         val pitchSlip = if (Random.nextDouble() < slipChance) (Random.nextDouble() * 1.0 - 0.5).toFloat() else 0f
-        
+
         return Rotation(humanYaw + yawSlip, humanPitch + pitchSlip).normalize()
     }
-    
+
     /**
      * Determines if an attack should intentionally miss to simulate human error
      */
     private fun shouldIntentionallyMiss(target: Entity): Boolean {
         // Base miss chance
         var missChance = baseMissChance
-        
+
         // Increase miss chance for fast-moving targets
         val targetSpeed = target.velocity.length()
         missChance += targetSpeed * 0.01f // Up to +1% for fast targets
-        
+
         // Increase miss chance for distant targets
         val distance = player.distanceTo(target)
         missChance += (distance / range) * 0.03f // Up to +3% for distant targets
-        
+
         // Increase miss chance when player is moving quickly
         val playerSpeed = player.velocity.length()
         missChance += playerSpeed * 0.015f // Up to +1.5% when moving fast
-        
+
         // Scale by humanization factor
         missChance *= humanizationFactor
-        
+
         return Random.nextFloat() < missChance
     }
-    
+
     /**
      * Applies variable CPS patterns to make clicking more human-like
      */
     private fun applyVariableCPS() {
         val currentMinCPS = clickScheduler.minCPS
         val currentMaxCPS = clickScheduler.maxCPS
-        
+
         // Calculate variation range based on variability setting
         val variation = currentMaxCPS * cpsVariability
-        
+
         // Create a pattern that varies over time
         val time = System.currentTimeMillis() / 1000.0
         val sinFactor = (sin(time * 0.2) + 1) / 2 // 0 to 1 sinusoidal pattern
-        
+
         // Apply variation with some randomness
         val randomFactor = Random.nextDouble() * 0.4 - 0.2 // -0.2 to 0.2
         val variationAmount = variation * (sinFactor + randomFactor).coerceIn(0.0, 1.0)
-        
+
         // Apply the variation to CPS values
         val newMinCPS = (currentMinCPS - variationAmount).coerceAtLeast(currentMinCPS * 0.7f)
         val newMaxCPS = (currentMaxCPS - variationAmount).coerceAtLeast(newMinCPS + 1)
-        
+
         // Update CPS values
         clickScheduler.minCPS = newMinCPS
         clickScheduler.maxCPS = newMaxCPS
     }
-    
+
     /**
      * Creates a non-linear path between two rotations for smoother, more human-like movement
-     * FIXED: Added rotation speed limits to prevent spinning
+     * Added rotation speed limits to prevent spinning
      */
     private fun createNonLinearPath(from: Rotation, to: Rotation, steps: Int): List<Rotation> {
-    val path = mutableListOf<Rotation>()
-    val limitedTo = applyRotationSpeedLimits(from, to)
-
-    for (i in 0 until steps) {
-        val t = i.toFloat() / steps
-        val ease = if (t < 0.5) 2 * t * t else -1 + (4 - 2 * t) * t
-
-        val rawYaw = from.yaw + getSmallestAngleDifference(from.yaw, limitedTo.yaw) * ease
-        val pitch = from.pitch + (limitedTo.pitch - from.pitch) * ease
-
-        // Thêm jitter nhỏ để tự nhiên hơn
-        val microJitterYaw = (Random.nextDouble() * 0.1 - 0.05).toFloat() * humanizationFactor
-        val microJitterPitch = (Random.nextDouble() * 0.1 - 0.05).toFloat() * humanizationFactor
-
-        path.add(Rotation(rawYaw + microJitterYaw, (pitch + microJitterPitch).coerceIn(-90f, 90f)).normalize())
-    }
-
-    return path
-}
         val path = mutableListOf<Rotation>()
-        
+        if (steps <= 0) return path
+
         // Apply rotation speed limits to prevent spinning
         val limitedTo = applyRotationSpeedLimits(from, to)
-        
-        // Create a bezier curve-like path instead of linear
+
         for (i in 0 until steps) {
             val t = i.toFloat() / steps
-            
-            // Non-linear easing function
-            val ease = if (t < 0.5) {
-                2 * t * t
-            } else {
-                -1 + (4 - 2 * t) * t
-            }
-            
-            // Add some horizontal/vertical bias occasionally (reduced for stability)
-            val horizontalBias = if (Random.nextDouble() < 0.2) (Random.nextDouble() * 0.4 - 0.2).toFloat() else 0f
-            val verticalBias = if (Random.nextDouble() < 0.1) (Random.nextDouble() * 0.2 - 0.1).toFloat() else 0f
-            
-            val yaw = from.yaw + (limitedTo.yaw - from.yaw) * ease + horizontalBias * humanizationFactor * 0.5f
-            val pitch = from.pitch + (limitedTo.pitch - from.pitch) * ease + verticalBias * humanizationFactor * 0.5f
-            
-            // Ensure pitch stays within valid range
-            val clampedPitch = pitch.coerceIn(-90f, 90f)
-            
-            path.add(Rotation(yaw, clampedPitch).normalize())
+            val ease = if (t < 0.5f) 2 * t * t else -1 + (4 - 2 * t) * t
+
+            val rawYaw = from.yaw + getSmallestAngleDifference(from.yaw, limitedTo.yaw) * ease
+            val pitch = from.pitch + (limitedTo.pitch - from.pitch) * ease
+
+            // Thêm jitter nhỏ để tự nhiên hơn
+            val microJitterYaw = (Random.nextDouble() * 0.1 - 0.05).toFloat() * humanizationFactor
+            val microJitterPitch = (Random.nextDouble() * 0.1 - 0.05).toFloat() * humanizationFactor
+
+            path.add(Rotation(rawYaw + microJitterYaw, (pitch + microJitterPitch).coerceIn(-90f, 90f)).normalize())
         }
-        
+
         return path
     }
-    
+
     /**
      * Applies rotation speed limits to prevent spinning
      * This is the key fix for the 360° rotation issue
      */
     private fun applyRotationSpeedLimits(from: Rotation, to: Rotation): Rotation {
-    var deltaYaw = getSmallestAngleDifference(from.yaw, to.yaw)
-    val deltaPitch = to.pitch - from.pitch
-
-    val elapsedTime = (System.currentTimeMillis() - lastRotationTime).coerceAtLeast(1) / 1000f
-    lastRotationTime = System.currentTimeMillis()
-
-    val maxYawChange = maxYawRotationSpeed * elapsedTime * 0.5f
-    val maxPitchChange = maxPitchRotationSpeed * elapsedTime * 0.5f
-
-    deltaYaw = deltaYaw.coerceIn(-maxYawChange, maxYawChange)
-    val limitedPitch = deltaPitch.coerceIn(-maxPitchChange, maxPitchChange)
-
-    val newYaw = from.yaw + deltaYaw
-    val newPitch = (from.pitch + limitedPitch).coerceIn(-90f, 90f)
-
-    return Rotation(newYaw, newPitch)
-}
         // Calculate the shortest yaw delta (prevents spinning)
         var deltaYaw = getSmallestAngleDifference(from.yaw, to.yaw)
         val deltaPitch = to.pitch - from.pitch
-        
-        // Get elapsed time since last rotation
+
+        // Get elapsed time since last rotation (seconds)
         val currentTime = System.currentTimeMillis()
         val elapsedTime = if (lastRotationTime > 0) (currentTime - lastRotationTime) / 1000f else 0.05f
         lastRotationTime = currentTime
-        
-        // Calculate maximum rotation allowed based on elapsed time
+
         val maxYawChange = maxYawRotationSpeed * elapsedTime
         val maxPitchChange = maxPitchRotationSpeed * elapsedTime
-        
-        // Limit rotation speed
-        val limitedDeltaYaw = deltaYaw.coerceIn(-maxYawChange, maxYawChange)
-        val limitedDeltaPitch = deltaPitch.coerceIn(-maxPitchChange, maxPitchChange)
-        
-        // Apply smoothing factor
-        val smoothedDeltaYaw = limitedDeltaYaw * rotationSmoothness
-        val smoothedDeltaPitch = limitedDeltaPitch * rotationSmoothness
-        
-        // Calculate new rotation
-        val newYaw = from.yaw + smoothedDeltaYaw
-        val newPitch = (from.pitch + smoothedDeltaPitch).coerceIn(-90f, 90f)
-        
-        // Update last rotation
+
+        deltaYaw = deltaYaw.coerceIn(-maxYawChange, maxYawChange)
+        val limitedPitch = deltaPitch.coerceIn(-maxPitchChange, maxPitchChange)
+
+        val newYaw = from.yaw + deltaYaw
+        val newPitch = (from.pitch + limitedPitch).coerceIn(-90f, 90f)
+
         lastRotation = Rotation(newYaw, newPitch)
-        
-        return Rotation(newYaw, newPitch)
+        return lastRotation!!
     }
-    
+
     /**
      * Gets the smallest angle difference between two yaw values
      * This prevents the 360° spinning issue by always taking the shortest path
@@ -1068,7 +1038,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         if (delta > 180f) delta -= 360f
         return delta
     }
-    
+
     /**
      * Calculates a context-aware rotation speed based on the situation
      */
@@ -1076,59 +1046,46 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         val distance = player.distanceTo(target)
         val isMoving = target.velocity.lengthSquared() > 0.01
         val baseSpeed = rotations.turnSpeed.toFloat()
-        
+
         // Slower rotations for distant targets, faster for close ones
         val distanceFactor = (1.0 - (distance / 8.0).coerceIn(0.0, 0.8)).toFloat()
-        
+
         // Faster rotations for moving targets
         val movementFactor = if (isMoving) 1.2f else 0.9f
-        
+
         // Add randomization
         val randomFactor = (0.85 + Random.nextDouble() * 0.3).toFloat()
-        
+
         return baseSpeed * distanceFactor * movementFactor * randomFactor
     }
-    
+
     /**
      * Improved shortest angle calculation with micro-randomization
-     * FIXED: Ensures we always take the shortest path to avoid spinning
+     * Ensures we always take the shortest path to avoid spinning
      */
     private fun getHumanizedShortestAngle(current: Float, target: Float): Float {
-    var delta = getSmallestAngleDifference(current, target)
+        var delta = getSmallestAngleDifference(current, target)
 
-    // Giới hạn tốc độ quay cơ bản
-    val maxRotation = maxYawRotationSpeed * 0.1f
-    delta = delta.coerceIn(-maxRotation, maxRotation)
-
-    // Random hóa phụ thuộc độ lớn delta (giữ tự nhiên)
-    val slipScale = if (abs(delta) < 5f) 1.5f else 0.5f
-    val randomization = (Random.nextDouble() * 0.02 - 0.01).toFloat() * humanizationFactor * slipScale
-
-    return current + delta + randomization
-}
-        // Calculate the smallest angle difference to avoid spinning
-        val delta = getSmallestAngleDifference(current, target)
-        
         // Add micro-randomization to avoid perfect mathematical patterns (reduced for stability)
         val randomization = (Random.nextDouble() * 0.03 - 0.015).toFloat() * humanizationFactor
-        
-        // Apply rotation speed limits
+
+        // Get elapsed time
         val currentTime = System.currentTimeMillis()
         val elapsedTime = if (lastRotationTime > 0) (currentTime - lastRotationTime) / 1000f else 0.05f
         lastRotationTime = currentTime
-        
-        // Calculate maximum rotation allowed based on elapsed time
+
+        // Apply rotation speed limits
         val maxYawChange = maxYawRotationSpeed * elapsedTime
-        
+
         // Limit rotation speed
         val limitedDelta = delta.coerceIn(-maxYawChange, maxYawChange)
-        
+
         // Apply smoothing
         val smoothedDelta = limitedDelta * rotationSmoothness
-        
+
         return current + smoothedDelta + randomization
     }
-    
+
     // ===== END OF NEW HUMANIZATION METHODS =====
 
     private fun createAIContext(): CombatAIContext {
@@ -1149,7 +1106,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             else -> PointTracker.AimSituation.FOR_THE_FUTURE
         }
         ModuleDebug.debugParameter(ModuleKillAura, "AimSituation", situation)
-        
+
         if (samePlayer) {
             val sticky = targetTracker.stickyTarget
             if (sticky != null) {
@@ -1168,7 +1125,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                 }
             }
         }
-        
+
         // Calculate variable range with humanization
         val maximumRange = if (targetTracker.closestSquaredEnemyDistance > range.pow(2)) {
             calculateVariableRange(range + currentScanExtraRange)
@@ -1184,17 +1141,17 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         // Apply natural target selection with hysteresis
         val potentialTargets = targetTracker.targets()
             .filter { entity -> entity.squaredBoxedDistanceTo(player) <= squaredMaxRange }
-        
+
         // Sort targets with some randomization
         val sortedTargets = potentialTargets.map { entity ->
             val distance = entity.squaredBoxedDistanceTo(player)
             val inNormalRange = distance <= squaredNormalRange
             val randomFactor = 0.9 + Random.nextDouble() * 0.2 // 0.9-1.1 random factor
-            
+
             // Primary sort by range category, secondary by distance with randomization
             Triple(entity, if (inNormalRange) 0 else 1, distance * randomFactor)
         }.sortedWith(compareBy<Triple<LivingEntity, Int, Double>> { it.second }.thenBy { it.third })
-        
+
         // Process targets with potential for natural switching
         val currentTarget = targetTracker.target
         val target = if (currentTarget != null && sortedTargets.any { it.first == currentTarget }) {
@@ -1228,24 +1185,24 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
             targetTracker.reset()
         }
     }
-    
+
     /**
      * Calculate a variable range that changes slightly over time to appear more human
      */
     private fun calculateVariableRange(baseRange: Float): Float {
         // Base variation
         val variationBase = (Random.nextDouble() * 0.4 - 0.2).toFloat()
-        
+
         // Context-aware adjustments
         val combatDuration = (System.currentTimeMillis() - combatStartTime) / 1000f
         val combatFactor = (1.0 - min(combatDuration / 30f, 0.3)).toFloat() // Reduce range slightly as combat continues
-        
+
         // Player movement adjustment
         val movementFactor = if (player.velocity.lengthSquared() > 0.01) 0.95f else 1.05f
-        
+
         // Scale by humanization factor
         val humanizedVariation = variationBase * humanizationFactor
-        
+
         return (baseRange + humanizedVariation) * combatFactor * movementFactor
     }
 
@@ -1280,7 +1237,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         // Create a non-linear path for rotation if needed
         if (ticks > 1 && humanizationFactor > 0.3f) {
             val path = createNonLinearPath(currentRotation, correctedRotation, ticks)
-            
+
             // Set the first rotation in the path
             if (path.isNotEmpty()) {
                 RotationManager.setRotationTarget(
@@ -1292,7 +1249,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                     priority = Priority.IMPORTANT_FOR_USAGE_2,
                     provider = this@ModuleKillAura
                 )
-                
+
                 // Schedule future rotations if needed
                 if (path.size > 1) {
                     aiScope.launch {
@@ -1310,7 +1267,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                         }
                     }
                 }
-                
+
                 return true
             }
         }
@@ -1328,7 +1285,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
         return true
     }
-    
+
     private fun getSpot(entity: LivingEntity, range: Double,
                         situation: PointTracker.AimSituation): RotationWithVector? {
         val point = pointTracker.gatherPoint(
