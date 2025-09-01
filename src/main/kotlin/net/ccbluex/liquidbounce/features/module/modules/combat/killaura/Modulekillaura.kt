@@ -274,8 +274,8 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
             var changes = 0
             for (i in 1 until history.size - 1) {
-                val prev = history[i-1].pos.subtract(history[i].pos).normalize()
-                val next = history[i+1].pos.subtract(history[i].pos).normalize()
+                val prev = history[i - 1].pos.subtract(history[i].pos).normalize()
+                val next = history[i + 1].pos.subtract(history[i].pos).normalize()
 
                 // If dot product is negative, direction changed significantly
                 if (prev.dotProduct(next) < 0) {
@@ -315,8 +315,8 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
 
             val circleScore = turningRate * 2.5 + (if (avgDistance < 4.0) 0.3 else 0.0) + rhythm * 0.2
             val aggressiveScore = closingRate * 5 +
-                                 (if (accelerations.isNotEmpty()) accelerations.average() * 2 else 0.0) +
-                                 (if (jerks.isNotEmpty()) jerks.average() else 0.0)
+                    (if (accelerations.isNotEmpty()) accelerations.average() * 2 else 0.0) +
+                    (if (jerks.isNotEmpty()) jerks.average() else 0.0)
             val defensiveScore = -closingRate * 4 + directionChanges * 0.05
 
             // Determine style based on highest score
