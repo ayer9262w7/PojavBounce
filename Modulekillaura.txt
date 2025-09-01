@@ -528,8 +528,18 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     val movementTracker = MovementHistoryTracker()
     private val learningEnabled by boolean("LearningEnabled", true)
     private val humanizationFactor by float("Humanization", 0.8f, 0.1f..1.0f)
+    
+    // Anti-spin settings
+    private val maxYawRotationSpeed by float("MaxYawSpeed", 40f, 10f..180f)
+    private val maxPitchRotationSpeed by float("MaxPitchSpeed", 30f, 10f..90f)
+    private val rotationSmoothness by float("RotationSmoothness", 0.7f, 0.1f..1.0f)
+    
     private val aiScope = CoroutineScope(Job() + Dispatchers.Default)
     private var combatStartTime = 0L
+    
+    // Track previous rotations to prevent spinning
+    private var lastRotation: Rotation? = null
+    private var lastRotationTime = 0L
     // =============================
 
     val clickScheduler = tree(KillAuraClicker)
@@ -595,6 +605,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         // cancel coroutine scope properly
         aiScope.cancel()
         combatStartTime = 0L
+        lastRotation = null
     }
 
     @Suppress("unused")
@@ -941,9 +952,13 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     
     /**
      * Creates a non-linear path between two rotations for smoother, more human-like movement
+     * FIXED: Added rotation speed limits to prevent spinning
      */
     private fun createNonLinearPath(from: Rotation, to: Rotation, steps: Int): List<Rotation> {
         val path = mutableListOf<Rotation>()
+        
+        // Apply rotation speed limits to prevent spinning
+        val limitedTo = applyRotationSpeedLimits(from, to)
         
         // Create a bezier curve-like path instead of linear
         for (i in 0 until steps) {
@@ -956,17 +971,66 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
                 -1 + (4 - 2 * t) * t
             }
             
-            // Add some horizontal/vertical bias occasionally
-            val horizontalBias = if (Random.nextDouble() < 0.3) (Random.nextDouble() * 0.8 - 0.4).toFloat() else 0f
-            val verticalBias = if (Random.nextDouble() < 0.2) (Random.nextDouble() * 0.5 - 0.25).toFloat() else 0f
+            // Add some horizontal/vertical bias occasionally (reduced for stability)
+            val horizontalBias = if (Random.nextDouble() < 0.2) (Random.nextDouble() * 0.4 - 0.2).toFloat() else 0f
+            val verticalBias = if (Random.nextDouble() < 0.1) (Random.nextDouble() * 0.2 - 0.1).toFloat() else 0f
             
-            val yaw = from.yaw + (to.yaw - from.yaw) * ease + horizontalBias * humanizationFactor
-            val pitch = from.pitch + (to.pitch - from.pitch) * ease + verticalBias * humanizationFactor
+            val yaw = from.yaw + (limitedTo.yaw - from.yaw) * ease + horizontalBias * humanizationFactor * 0.5f
+            val pitch = from.pitch + (limitedTo.pitch - from.pitch) * ease + verticalBias * humanizationFactor * 0.5f
             
-            path.add(Rotation(yaw, pitch).normalize())
+            // Ensure pitch stays within valid range
+            val clampedPitch = pitch.coerceIn(-90f, 90f)
+            
+            path.add(Rotation(yaw, clampedPitch).normalize())
         }
         
         return path
+    }
+    
+    /**
+     * Applies rotation speed limits to prevent spinning
+     * This is the key fix for the 360° rotation issue
+     */
+    private fun applyRotationSpeedLimits(from: Rotation, to: Rotation): Rotation {
+        // Calculate the shortest yaw delta (prevents spinning)
+        var deltaYaw = getSmallestAngleDifference(from.yaw, to.yaw)
+        val deltaPitch = to.pitch - from.pitch
+        
+        // Get elapsed time since last rotation
+        val currentTime = System.currentTimeMillis()
+        val elapsedTime = if (lastRotationTime > 0) (currentTime - lastRotationTime) / 1000f else 0.05f
+        lastRotationTime = currentTime
+        
+        // Calculate maximum rotation allowed based on elapsed time
+        val maxYawChange = maxYawRotationSpeed * elapsedTime
+        val maxPitchChange = maxPitchRotationSpeed * elapsedTime
+        
+        // Limit rotation speed
+        val limitedDeltaYaw = deltaYaw.coerceIn(-maxYawChange, maxYawChange)
+        val limitedDeltaPitch = deltaPitch.coerceIn(-maxPitchChange, maxPitchChange)
+        
+        // Apply smoothing factor
+        val smoothedDeltaYaw = limitedDeltaYaw * rotationSmoothness
+        val smoothedDeltaPitch = limitedDeltaPitch * rotationSmoothness
+        
+        // Calculate new rotation
+        val newYaw = from.yaw + smoothedDeltaYaw
+        val newPitch = (from.pitch + smoothedDeltaPitch).coerceIn(-90f, 90f)
+        
+        // Update last rotation
+        lastRotation = Rotation(newYaw, newPitch)
+        
+        return Rotation(newYaw, newPitch)
+    }
+    
+    /**
+     * Gets the smallest angle difference between two yaw values
+     * This prevents the 360° spinning issue by always taking the shortest path
+     */
+    private fun getSmallestAngleDifference(from: Float, to: Float): Float {
+        var delta = ((to - from) % 360f + 360f) % 360f
+        if (delta > 180f) delta -= 360f
+        return delta
     }
     
     /**
@@ -991,16 +1055,30 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
     
     /**
      * Improved shortest angle calculation with micro-randomization
+     * FIXED: Ensures we always take the shortest path to avoid spinning
      */
     private fun getHumanizedShortestAngle(current: Float, target: Float): Float {
-        var delta = (target - current) % 360f
-        if (delta > 180f) delta -= 360f
-        if (delta < -180f) delta += 360f
+        // Calculate the smallest angle difference to avoid spinning
+        val delta = getSmallestAngleDifference(current, target)
         
-        // Add micro-randomization to avoid perfect mathematical patterns
-        val randomization = (Random.nextDouble() * 0.06 - 0.03).toFloat() * humanizationFactor
+        // Add micro-randomization to avoid perfect mathematical patterns (reduced for stability)
+        val randomization = (Random.nextDouble() * 0.03 - 0.015).toFloat() * humanizationFactor
         
-        return current + delta + randomization
+        // Apply rotation speed limits
+        val currentTime = System.currentTimeMillis()
+        val elapsedTime = if (lastRotationTime > 0) (currentTime - lastRotationTime) / 1000f else 0.05f
+        lastRotationTime = currentTime
+        
+        // Calculate maximum rotation allowed based on elapsed time
+        val maxYawChange = maxYawRotationSpeed * elapsedTime
+        
+        // Limit rotation speed
+        val limitedDelta = delta.coerceIn(-maxYawChange, maxYawChange)
+        
+        // Apply smoothing
+        val smoothedDelta = limitedDelta * rotationSmoothness
+        
+        return current + smoothedDelta + randomization
     }
     
     // ===== END OF NEW HUMANIZATION METHODS =====
@@ -1137,7 +1215,7 @@ object ModuleKillAura : ClientModule("KillAura", Category.COMBAT) {
         val currentRotation = RotationManager.serverRotation
         val correctedRotation = Rotation(
             getHumanizedShortestAngle(currentRotation.yaw, rotation.yaw),
-            rotation.pitch
+            rotation.pitch.coerceIn(-90f, 90f) // Ensure pitch stays in valid range
         )
 
         when (rotations.rotationTiming) {
